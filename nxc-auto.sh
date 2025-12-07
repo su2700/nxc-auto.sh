@@ -88,12 +88,12 @@ else
     echo -e "\n\033[93m[!] Skipping LDAP domain SID (no credentials supplied)\033[0m"
 fi
 
-# Guest access (requires domain)
+# Guest access (domain optional)
+echo -e "\n\033[96m[+] Checking Guest access\033[0m"
 if [ -n "$domain" ]; then
-    echo -e "\n\033[96m[+] Checking Guest access\033[0m"
     nxc smb $IP -d "$domain" -u 'guest' -p '' # check for guest access
 else
-    echo -e "\n\033[93m[!] Skipping Guest access check (no domain supplied)\033[0m"
+    nxc smb $IP -u 'guest' -p '' # check for guest access
 fi
 
 # Anonymous access (domain optional)
