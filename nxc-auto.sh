@@ -204,8 +204,20 @@ if echo "$lookupsid_output" | grep -q "SidTypeUser\|SidTypeGroup"; then
     echo -e "\n\033[92m[+] Successfully enumerated users/groups via anonymous RPC!\033[0m"
     echo "# Results saved to: nxc-enum/smb/lookupsid-anonymous.txt"
     echo ""
-    echo "# Extract usernames:"
-    echo "grep 'SidTypeUser' nxc-enum/smb/lookupsid-anonymous.txt | grep -v '\$' | awk -F'\\\\' '{print \$2}' | awk '{print \$1}'"
+    
+    # Automatically extract and save usernames
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    users_file="nxc-enum/smb/users_${timestamp}.txt"
+    grep 'SidTypeUser' nxc-enum/smb/lookupsid-anonymous.txt | awk -F'\\' '{print $2}' | awk '{print $1}' | grep -v '\$$' > "$users_file"
+    
+    echo -e "\033[92m[+] Extracted usernames saved to: $users_file\033[0m"
+    echo "# Found $(wc -l < "$users_file") users (excluding machine accounts)"
+    echo ""
+    echo "# View users:"
+    echo "cat $users_file"
+    echo ""
+    echo "# Use for password spraying:"
+    echo "nxc smb $IP -u $users_file -p 'Password123' --continue-on-success"
     echo ""
 fi
 
