@@ -137,7 +137,7 @@ if echo "$guest_output" | grep -q "\[+\]" && ! echo "$guest_output" | grep -q "E
                 share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
                 share=${share#\\}
                 if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
-                    echo "smbget -R smb://$IP/$share -U guest%"
+                    echo "smbget -R //$IP/$share -U guest%"
                     echo "# Or with smbclient: smbclient //$IP/$share -U 'guest%' -c 'prompt OFF;recurse ON;mget *'"
                 fi
             fi
@@ -184,7 +184,7 @@ if echo "$anon_output" | grep -q "\[+\]" && ! echo "$anon_output" | grep -q "Err
                 share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
                 share=${share#\\}
                 if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
-                    echo "smbget -R smb://$IP/$share -U %"
+                    echo "smbget -R //$IP/$share -U %"
                     echo "# Or with smbclient: smbclient //$IP/$share -N -c 'prompt OFF;recurse ON;mget *'"
                 fi
             fi

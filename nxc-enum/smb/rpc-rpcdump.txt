@@ -404,6 +404,18 @@ Bindings:
           ncalrpc:[umpo]
 
 Protocol: N/A 
+Provider: pcasvc.dll 
+UUID    : 0767A036-0D22-48AA-BA69-B619480F38CB v1.0 PcaSvc
+Bindings: 
+          ncalrpc:[LRPC-f685c98250f794dd99]
+          ncalrpc:[LRPC-1273579c7eed7a75e2]
+          ncalrpc:[TSUMRPD_PRINT_DRV_LPC_API]
+          ncalrpc:[LRPC-5d705ae949962dd1fd]
+          ncalrpc:[OLECB29B61AF3284B0323BDF30FB95A]
+          ncalrpc:[LRPC-8f6a4656d6e724cd1c]
+          ncalrpc:[LRPC-b38220aab212d97656]
+
+Protocol: N/A 
 Provider: N/A 
 UUID    : BF4DC912-E52F-4904-8EBE-9317C1BDD497 v1.0 
 Bindings: 
@@ -538,13 +550,13 @@ Protocol: N/A
 Provider: N/A 
 UUID    : FAF2447B-B348-4FEB-8DBE-BEEE5B7F7778 v1.0 OnlineProviderCert RPC Interface
 Bindings: 
-          ncalrpc:[LRPC-3e2346efcc486a627d]
+          ncalrpc:[LRPC-508b1917c91f9e0d0e]
 
 Protocol: N/A 
 Provider: N/A 
 UUID    : CC105610-DA03-467E-BC73-5B9E2937458D v1.0 LiveIdSvc RPC Interface
 Bindings: 
-          ncalrpc:[LRPC-3e2346efcc486a627d]
+          ncalrpc:[LRPC-508b1917c91f9e0d0e]
 
 Protocol: N/A 
 Provider: N/A 
@@ -895,31 +907,10 @@ Bindings:
           ncalrpc:[lsapolicylookup]
           ncalrpc:[LSA_EAS_ENDPOINT]
           ncalrpc:[lsacap]
-          ncalrpc:[LSARPC_ENDPOINT]
-          ncalrpc:[securityevent]
-          ncalrpc:[audit]
-          ncacn_np:\\WIN-2BO8M1OE1M1[\pipe\lsass]
-
-Protocol: [MS-LSAT]: Local Security Authority (Translation Methods) Remote 
-Provider: lsasrv.dll 
-UUID    : 12345778-1234-ABCD-EF00-0123456789AB v0.0 
-Bindings: 
-          ncacn_ip_tcp:10.64.149.52[49669]
-          ncacn_np:\\WIN-2BO8M1OE1M1[\pipe\0a9390757824aa4e]
-          ncacn_http:10.64.149.52[49668]
           ncacn_np:\\WIN-2BO8M1OE1M1[\pipe\lsass]
           ncalrpc:[audit]
           ncalrpc:[securityevent]
           ncalrpc:[LSARPC_ENDPOINT]
-          ncalrpc:[lsacap]
-          ncalrpc:[LSA_EAS_ENDPOINT]
-          ncalrpc:[lsapolicylookup]
-          ncalrpc:[lsasspirpc]
-          ncalrpc:[protected_storage]
-          ncalrpc:[SidKey Local End Point]
-          ncalrpc:[samss lpc]
-          ncacn_ip_tcp:10.64.149.52[49667]
-          ncalrpc:[NTDS_LPC]
 
 Protocol: N/A 
 Provider: N/A 
@@ -1163,4 +1154,25 @@ Bindings:
           ncacn_np:\\WIN-2BO8M1OE1M1[\pipe\0a9390757824aa4e]
           ncacn_ip_tcp:10.64.149.52[49669]
 
-[*] Received 602 endpoints.
+Protocol: [MS-LSAT]: Local Security Authority (Translation Methods) Remote 
+Provider: lsasrv.dll 
+UUID    : 12345778-1234-ABCD-EF00-0123456789AB v0.0 
+Bindings: 
+          ncacn_np:\\WIN-2BO8M1OE1M1[\pipe\lsass]
+          ncalrpc:[audit]
+          ncalrpc:[securityevent]
+          ncalrpc:[LSARPC_ENDPOINT]
+          ncalrpc:[lsacap]
+          ncalrpc:[LSA_EAS_ENDPOINT]
+          ncalrpc:[lsapolicylookup]
+          ncalrpc:[lsasspirpc]
+          ncalrpc:[protected_storage]
+          ncalrpc:[SidKey Local End Point]
+          ncalrpc:[samss lpc]
+          ncacn_ip_tcp:10.64.149.52[49667]
+          ncalrpc:[NTDS_LPC]
+          ncacn_http:10.64.149.52[49668]
+          ncacn_np:\\WIN-2BO8M1OE1M1[\pipe\0a9390757824aa4e]
+          ncacn_ip_tcp:10.64.149.52[49669]
+
+[*] Received 609 endpoints.
