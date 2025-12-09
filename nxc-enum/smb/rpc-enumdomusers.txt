@@ -1,0 +1,5 @@
+user:[Administrator] rid:[0x1f4]
+user:[Guest] rid:[0x1f5]
+user:[krbtgt] rid:[0x1f6]
+user:[lparker] rid:[0x44f]
+user:[jmurphy] rid:[0x450]

