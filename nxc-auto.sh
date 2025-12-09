@@ -137,8 +137,8 @@ if echo "$guest_output" | grep -q "\[+\]" && ! echo "$guest_output" | grep -q "E
                 share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
                 share=${share#\\}
                 if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
-                    echo "smbget -R //$IP/$share -U guest%"
-                    echo "# Or with smbclient: smbclient //$IP/$share -U 'guest%' -c 'prompt OFF;recurse ON;mget *'"
+                    echo "smbclient //$IP/$share -U 'guest%' -c 'prompt OFF;recurse ON;mget *'"
+                    echo "# Or with smbget: smbget -R //$IP/$share -U guest%"
                 fi
             fi
         done
@@ -184,14 +184,32 @@ if echo "$anon_output" | grep -q "\[+\]" && ! echo "$anon_output" | grep -q "Err
                 share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
                 share=${share#\\}
                 if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
-                    echo "smbget -R //$IP/$share -U %"
-                    echo "# Or with smbclient: smbclient //$IP/$share -N -c 'prompt OFF;recurse ON;mget *'"
+                    echo "smbclient //$IP/$share -N -c 'prompt OFF;recurse ON;mget *'"
+                    echo "# Or with smbget: smbget -R //$IP/$share -U %"
                 fi
             fi
         done
         echo ""
     fi
 fi
+
+
+echo -e "\n\033[96m[+] Anonymous RPC User Enumeration (lookupsid.py)\033[0m"
+echo "# Attempting anonymous SID bruteforce to enumerate users..."
+lookupsid_output=$(timeout 30s lookupsid.py -no-pass anonymous@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-anonymous.txt)
+echo "$lookupsid_output"
+
+# Check if lookupsid found users
+if echo "$lookupsid_output" | grep -q "SidTypeUser\|SidTypeGroup"; then
+    echo -e "\n\033[92m[+] Successfully enumerated users/groups via anonymous RPC!\033[0m"
+    echo "# Results saved to: nxc-enum/smb/lookupsid-anonymous.txt"
+    echo ""
+    echo "# Extract usernames:"
+    echo "grep 'SidTypeUser' nxc-enum/smb/lookupsid-anonymous.txt | grep -v '\$' | awk -F'\\\\' '{print \$2}' | awk '{print \$1}'"
+    echo ""
+fi
+
+
 
 echo -e "\n\033[96m[+] Checking FTP Anonymous access\033[0m"
 ftp_output=$(timeout 5s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2)
@@ -227,8 +245,11 @@ if echo "$ldap_output" | grep -q "\[+\]"; then
         echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" \"(objectClass=user)\" | tee ldap-users.txt"
         echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" \"(objectClass=group)\" | tee ldap-groups.txt"
     else
-        echo "ldapsearch -x -H ldap://$IP -b \"\" -s base namingContexts  # Get base DN"
-        echo "# Then use: ldapsearch -x -H ldap://$IP -b \"DC=domain,DC=com\" -s sub \"(objectClass=*)\""
+        echo "# Get base DN (usually works anonymously):"
+        echo "ldapsearch -x -H ldap://$IP -b \"\" -s base namingContexts"
+        echo ""
+        echo "# Note: Object enumeration often requires credentials. Try with valid creds:"
+        echo "# ldapsearch -x -H ldap://$IP -D \"CN=user,DC=domain,DC=local\" -w 'password' -b \"DC=domain,DC=local\" -s sub \"(objectClass=*)\""
     fi
     echo ""
 fi
