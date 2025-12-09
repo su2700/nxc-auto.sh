@@ -113,8 +113,10 @@ if echo "$guest_output" | grep -q "\[+\]" && ! echo "$guest_output" | grep -q "E
     if echo "$guest_output" | grep -qE "READ|WRITE"; then
         echo -e "\n\033[92m[+] Guest SMB access successful! Suggested commands:\033[0m"
         echo "rpcclient -U 'guest%' $IP"
+        echo ""
         
         # Suggest specific shares if found
+        echo "# Connect to shares:"
         echo "$guest_output" | while read -r line; do
             clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
             if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
@@ -122,6 +124,21 @@ if echo "$guest_output" | grep -q "\[+\]" && ! echo "$guest_output" | grep -q "E
                 share=${share#\\}
                 if [ ! -z "$share" ]; then
                     echo "smbclient -U 'guest%' //$IP/$share"
+                fi
+            fi
+        done
+        echo ""
+        
+        # Suggest recursive download commands
+        echo "# Download all files recursively:"
+        echo "$guest_output" | while read -r line; do
+            clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+            if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                share=${share#\\}
+                if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
+                    echo "smbget -R smb://$IP/$share -U guest%"
+                    echo "# Or with smbclient: smbclient //$IP/$share -U 'guest%' -c 'prompt OFF;recurse ON;mget *'"
                 fi
             fi
         done
@@ -143,8 +160,10 @@ if echo "$anon_output" | grep -q "\[+\]" && ! echo "$anon_output" | grep -q "Err
     if echo "$anon_output" | grep -qE "READ|WRITE"; then
         echo -e "\n\033[92m[+] Anonymous SMB access successful! Suggested commands:\033[0m"
         echo "rpcclient -U '' -N $IP"
+        echo ""
         
         # Suggest specific shares if found
+        echo "# Connect to shares:"
         echo "$anon_output" | while read -r line; do
             clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
             if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
@@ -152,6 +171,21 @@ if echo "$anon_output" | grep -q "\[+\]" && ! echo "$anon_output" | grep -q "Err
                 share=${share#\\}
                 if [ ! -z "$share" ]; then
                     echo "smbclient -U '' -N //$IP/$share"
+                fi
+            fi
+        done
+        echo ""
+        
+        # Suggest recursive download commands
+        echo "# Download all files recursively:"
+        echo "$anon_output" | while read -r line; do
+            clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+            if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                share=${share#\\}
+                if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
+                    echo "smbget -R smb://$IP/$share -U %"
+                    echo "# Or with smbclient: smbclient //$IP/$share -N -c 'prompt OFF;recurse ON;mget *'"
                 fi
             fi
         done
