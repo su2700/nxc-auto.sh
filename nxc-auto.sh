@@ -160,7 +160,23 @@ if echo "$anon_output" | grep -q "\[+\]" && ! echo "$anon_output" | grep -q "Err
 fi
 
 echo -e "\n\033[96m[+] Checking FTP Anonymous access\033[0m"
-timeout 5s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2
+ftp_output=$(timeout 5s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2)
+echo "$ftp_output"
+
+# Check if anonymous FTP access succeeded and suggest commands
+if echo "$ftp_output" | grep -q "\[+\]"; then
+    echo -e "\n\033[92m[+] Anonymous FTP access successful! Suggested commands:\033[0m"
+    echo "ftp $IP"
+    echo "# Username: anonymous"
+    echo "# Password: anonymous"
+    echo ""
+    echo "# Or use lftp for better features:"
+    echo "lftp -u anonymous,anonymous $IP"
+    echo ""
+    echo "# Download all files recursively:"
+    echo "wget -r ftp://anonymous:anonymous@$IP/"
+    echo ""
+fi
 
 echo -e "\n\033[96m[+] Checking LDAP Anonymous access\033[0m"
 ldap_output=$(timeout 5s nxc ldap $IP -u '' -p '' --timeout 2)
