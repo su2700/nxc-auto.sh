@@ -1,5 +1,5 @@
-[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m Windows 10 / Server 2019 Build 17763 x64 (name:ATTACKTIVEDIREC) (domain:spookysec.local) ([1;32msigning:True[0m) ([1;36mSMBv1:False[0m) 
-[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;32m[+][0m spookysec.local\svc-admin:management2005 
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m Windows 10 / Server 2019 Build 17763 x64 (name:ATTACKTIVEDIREC) (domain:spookysec.local) ([1;32msigning:True[0m) ([1;36mSMBv1:False[0m)
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;32m[+][0m spookysec.local\svc-admin:management2005
 [1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m Started module spidering_plus with the following options:
 [1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m  DOWNLOAD_FLAG: False
 [1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m     STATS_FLAG: True
@@ -14,8 +14,8 @@
 [1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mbackup          READ            [0m
 [1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mC$                              Default share[0m
 [1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mIPC$            READ            Remote IPC[0m
-[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mNETLOGON        READ            Logon server share [0m
-[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mSYSVOL          READ            Logon server share [0m
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mNETLOGON        READ            Logon server share[0m
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mSYSVOL          READ            Logon server share[0m
 [1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;32m[+][0m Saved share-file metadata to "/home/noah/.nxc/modules/nxc_spider_plus/10.66.172.163.json".
 [1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m SMB Shares:           6 (ADMIN$, backup, C$, IPC$, NETLOGON, SYSVOL)
 [1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m SMB Readable Shares:  4 (backup, IPC$, NETLOGON, SYSVOL)
