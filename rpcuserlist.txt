@@ -1,0 +1,17 @@
+Administrator
+Guest
+krbtgt
+skidy
+breakerofthings
+james
+optional
+sherlocksec
+darkstar
+Ori
+robin
+paradox
+Muirland
+horshark
+svc-admin
+backup
+a-spooks

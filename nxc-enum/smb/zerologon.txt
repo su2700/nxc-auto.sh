@@ -1,2 +1,2 @@
-[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m Windows 10 / Server 2019 Build 17763 x64 (name:ATTACKTIVEDIREC) (domain:spookysec.local) ([1;32msigning:True[0m) ([1;36mSMBv1:False[0m)
-[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;32m[+][0m spookysec.local\svc-admin:management2005
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m Windows 10 / Server 2019 Build 17763 x64 (name:ATTACKTIVEDIREC) (domain:spookysec.local) ([1;32msigning:True[0m) ([1;36mSMBv1:False[0m) 
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;32m[+][0m spookysec.local\svc-admin:management2005 
