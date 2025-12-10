@@ -1,0 +1,27 @@
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m Windows 10 / Server 2019 Build 17763 x64 (name:ATTACKTIVEDIREC) (domain:spookysec.local) ([1;32msigning:True[0m) ([1;36mSMBv1:False[0m)
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;32m[+][0m spookysec.local\svc-admin:management2005
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m Started module spidering_plus with the following options:
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m  DOWNLOAD_FLAG: False
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m     STATS_FLAG: True
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m EXCLUDE_FILTER: ['print$', 'ipc$']
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m   EXCLUDE_EXTS: ['ico', 'lnk']
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m  MAX_FILE_SIZE: 50 KB
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m  OUTPUT_FOLDER: /home/noah/.nxc/modules/nxc_spider_plus
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m Enumerated shares
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mShare           Permissions     Remark[0m
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33m-----           -----------     ------[0m
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mADMIN$                          Remote Admin[0m
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mbackup          READ            [0m
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mC$                              Default share[0m
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mIPC$            READ            Remote IPC[0m
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mNETLOGON        READ            Logon server share[0m
+[1;34mSMB[0m         10.66.172.163   445    ATTACKTIVEDIREC  [1;33mSYSVOL          READ            Logon server share[0m
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;32m[+][0m Saved share-file metadata to "/home/noah/.nxc/modules/nxc_spider_plus/10.66.172.163.json".
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m SMB Shares:           6 (ADMIN$, backup, C$, IPC$, NETLOGON, SYSVOL)
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m SMB Readable Shares:  4 (backup, IPC$, NETLOGON, SYSVOL)
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m SMB Filtered Shares:  1
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m Total folders found:  25
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m Total files found:    6
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m File size average:    1.44 KB
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m File size min:        22 B
+[1;36mSPIDER_PLUS[0m 10.66.172.163   445    ATTACKTIVEDIREC  [1;34m[*][0m File size max:        4.07 KB

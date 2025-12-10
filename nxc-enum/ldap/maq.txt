@@ -1,0 +1,4 @@
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;34m[*][0m Windows 10 / Server 2019 Build 17763 (name:ATTACKTIVEDIRECTORY) (domain:spookysec.local)
+[1;34mLDAP[0m        10.66.172.163   389    ATTACKTIVEDIRECTORY [1;32m[+][0m spookysec.local\svc-admin:management2005
+[1;36mMAQ[0m         10.66.172.163   389    ATTACKTIVEDIRECTORY [1;34m[*][0m Getting the MachineAccountQuota
+[1;36mMAQ[0m         10.66.172.163   389    ATTACKTIVEDIRECTORY [1;33mMachineAccountQuota: 10[0m

