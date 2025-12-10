@@ -6,27 +6,36 @@ user=""
 pass=""
 domain=""
 hash=""
+os_type="windows"  # Default to Windows
 
 # Function to display help
 usage() {
-    echo "Usage: $0 -i IP [-u USER] [-p PASSWORD] [-d DOMAIN] [-H HASH]"
-    echo "  -i  Target IP address"
+    echo "Usage: $0 -i IP [-u USER] [-p PASSWORD] [-d DOMAIN] [-H HASH] [-o OS]"
+    echo "  -i  Target IP address (required)"
     echo "  -u  Username"
     echo "  -p  Password"
     echo "  -d  Domain"
     echo "  -H  NTLM Hash"
+    echo "  -o  Target OS type: 'w' or 'windows' (default), 'l' or 'linux'"
     echo "  -h  Show this help message"
     exit 1
 }
 
 # Parse arguments
-while getopts "i:u:p:d:H:h" opt; do
+while getopts "i:u:p:d:H:o:h" opt; do
     case $opt in
         i) IP="$OPTARG" ;;
         u) user="$OPTARG" ;;
         p) pass="$OPTARG" ;;
         d) domain="$OPTARG" ;;
         H) hash="$OPTARG" ;;
+        o) 
+            case "${OPTARG,,}" in  # Convert to lowercase
+                w|windows) os_type="windows" ;;
+                l|linux) os_type="linux" ;;
+                *) echo "Error: Invalid OS type. Use 'w/windows' or 'l/linux'"; usage ;;
+            esac
+            ;;
         h) usage ;;
         *) usage ;;
     esac
@@ -77,16 +86,23 @@ ENDC='\033[0m'
 BOLD='\033[1m'
 UNDERLINE='\033[4m'
 
+echo -e "\n\033[96m[+] Target OS Type:\033[0m $os_type"
 echo -e "\n\033[96m[+] Logging Enabled:\033[0m `pwd`/nxc-enum\n"
 mkdir -p nxc-enum nxc-enum/smb nxc-enum/ldap
 
 echo -e "\n\033[96m[+] OS info, Name, Domain, SMB versions\033[0m\n"
 # checks if the SMB service is running; returns OS info, name, domain, SMB versions
-# LDAP domain SID (requires credentials)
-if [ -n "$user" ]; then
-    unbuffer nxc ldap $IP $USER_FLAG --get-sid --users | tee nxc-enum/ldap/domain-sid.txt
+
+# Skip Windows-specific LDAP/AD checks for Linux targets
+if [ "$os_type" = "windows" ]; then
+    # LDAP domain SID (requires credentials)
+    if [ -n "$user" ]; then
+        unbuffer nxc ldap $IP $USER_FLAG --get-sid --users | tee nxc-enum/ldap/domain-sid.txt
+    else
+        echo -e "\n\033[93m[!] Skipping LDAP domain SID (no credentials supplied)\033[0m"
+    fi
 else
-    echo -e "\n\033[93m[!] Skipping LDAP domain SID (no credentials supplied)\033[0m"
+    echo -e "\n\033[93m[!] Skipping Windows-specific LDAP/AD checks (target OS: Linux)\033[0m"
 fi
 
 # Guest access (domain optional)

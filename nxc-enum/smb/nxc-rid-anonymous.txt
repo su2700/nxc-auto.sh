@@ -1,3 +1,0 @@
-SMB                      10.65.170.13    445    WIN-2BO8M1OE1M1  [*] Windows 10 / Server 2019 Build 17763 x64 (name:WIN-2BO8M1OE1M1) (domain:vulnnet-rst.local) (signing:True) (SMBv1:False)
-SMB                      10.65.170.13    445    WIN-2BO8M1OE1M1  [+] vulnnet-rst.local\: 
-SMB                      10.65.170.13    445    WIN-2BO8M1OE1M1  [-] Error connecting: LSAD SessionError: code: 0xc0000022 - STATUS_ACCESS_DENIED - {Access Denied} A process has requested access to an object but has not been granted those access rights.

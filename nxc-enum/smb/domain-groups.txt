@@ -1,3 +1,0 @@
-[1;34mSMB[0m         10.65.170.13    445    WIN-2BO8M1OE1M1  [1;34m[*][0m Windows 10 / Server 2019 Build 17763 x64 (name:WIN-2BO8M1OE1M1) (domain:vulnnet-rst.local) ([1;32msigning:True[0m) ([1;36mSMBv1:False[0m) 
-[1;34mSMB[0m         10.65.170.13    445    WIN-2BO8M1OE1M1  [1;32m[+][0m vulnnet-rst.local\t-skid:tj072889* 
-[1;34mSMB[0m         10.65.170.13    445    WIN-2BO8M1OE1M1  [1;31m[-][0m [REMOVED] Arg moved to the ldap protocol

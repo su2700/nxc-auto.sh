@@ -1,2 +1,0 @@
-[1;34mRPC[0m         10.65.170.13    135    WIN-2BO8M1OE1M1  [1;34m[*][0m Windows 10 / Server 2019 Build 17763 (name:WIN-2BO8M1OE1M1) (domain:vulnnet-rst.local)
-[1;34mRPC[0m         10.65.170.13    135    WIN-2BO8M1OE1M1  [1;32m[+][0m vulnnet-rst.local\t-skid:tj072889* 

@@ -1,8 +1,0 @@
-user:[Administrator] rid:[0x1f4]
-user:[Guest] rid:[0x1f5]
-user:[krbtgt] rid:[0x1f6]
-user:[enterprise-core-vn] rid:[0x450]
-user:[a-whitehat] rid:[0x451]
-user:[t-skid] rid:[0x455]
-user:[j-goldenhand] rid:[0x456]
-user:[j-leet] rid:[0x457]
