@@ -1,10 +1,1 @@
-Impacket v0.14.0.dev0+20251204.163933.2347bd3f - Copyright Fortra, LLC and its affiliated companies 
-
-[-] User Administrator doesn't have UF_DONT_REQUIRE_PREAUTH set
-[-] User Guest doesn't have UF_DONT_REQUIRE_PREAUTH set
-[-] Kerberos SessionError: KDC_ERR_CLIENT_REVOKED(Clients credentials have been revoked)
-[-] User enterprise-core-vn doesn't have UF_DONT_REQUIRE_PREAUTH set
-[-] User a-whitehat doesn't have UF_DONT_REQUIRE_PREAUTH set
 $krb5asrep$23$t-skid@VULNNET-RST.LOCAL:cc48b696f84b2b706b98b48df24502c8$aea7275824c05e09428ae693385c80830854f53c54073d1ae68af1c50dbf723d8840bf9b4081061fbe31d3fdb310f71d6ff0d33f5f73606e905be84c18005bdc7194966e13facb70dd1ae7cc20e005152d3490ee386e559cbc53ddc419ff9b2c5a955c8f0d9ee2522bb12df27687efd364401520a8f75f8a54d8a06763dad09ce0264bb6f84aadcb136bfe66d3376b6aa9f858695297bd771f507d629da0608a5942b8a56e4373914ea1458a10d13e7ff206b0ad88186ae952f7cd87f9006b4814df89218440c5c641ab22cd3f07bcabf9f8b2c6ddd22a8fb9a77cd4b9bb5ca538ce71bca04b6cfe29cb77de0355a1a2d6cb4b6222ba
-[-] User j-goldenhand doesn't have UF_DONT_REQUIRE_PREAUTH set
-[-] User j-leet doesn't have UF_DONT_REQUIRE_PREAUTH set

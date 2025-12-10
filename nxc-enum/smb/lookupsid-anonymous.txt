@@ -1,7 +1,7 @@
 Impacket v0.14.0.dev0+20251204.163933.2347bd3f - Copyright Fortra, LLC and its affiliated companies 
 
-[*] Brute forcing SIDs at 10.65.159.40
-[*] StringBinding ncacn_np:10.65.159.40[\pipe\lsarpc]
+[*] Brute forcing SIDs at 10.65.170.13
+[*] StringBinding ncacn_np:10.65.170.13[\pipe\lsarpc]
 [*] Domain SID is: S-1-5-21-1589833671-435344116-4136949213
 498: VULNNET-RST\Enterprise Read-only Domain Controllers (SidTypeGroup)
 500: VULNNET-RST\Administrator (SidTypeUser)

