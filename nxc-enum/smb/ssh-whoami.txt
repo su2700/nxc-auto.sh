@@ -1,4 +1,0 @@
-[1;34mSSH[0m         10.67.185.163   22     10.67.185.163    [1;34m[*][0m SSH-2.0-OpenSSH_7.6p1 Ubuntu-4ubuntu0.3
-[1;34mSSH[0m         10.67.185.163   22     10.67.185.163    [1;32m[+][0m aubreanna:bubb13guM!@#123  [1;33mLinux - Shell access![0m
-[1;34mSSH[0m         10.67.185.163   22     10.67.185.163    [1;32m[+][0m Executed command
-[1;34mSSH[0m         10.67.185.163   22     10.67.185.163    [1;33maubreanna[0m
