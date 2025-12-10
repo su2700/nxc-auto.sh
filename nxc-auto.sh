@@ -105,108 +105,113 @@ else
     echo -e "\n\033[93m[!] Skipping Windows-specific LDAP/AD checks (target OS: Linux)\033[0m"
 fi
 
-# Guest access (domain optional)
-echo -e "\n\033[96m[+] Checking Guest access\033[0m"
-if [ -n "$domain" ]; then
-    guest_output=$(nxc smb $IP -d "$domain" -u 'guest' -p '' --shares)
-else
-    guest_output=$(nxc smb $IP -u 'guest' -p '' --shares)
-fi
-echo "$guest_output"
-
-# Check if guest access succeeded and suggest commands
-if echo "$guest_output" | grep -q "\[+\]" && ! echo "$guest_output" | grep -q "Error enumerating shares"; then
-    # Check if we actually have accessible shares
-    has_shares=false
-    echo "$guest_output" | while read -r line; do
-        clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
-        if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-            has_shares=true
-            break
-        fi
-    done
+# Skip Windows-specific anonymous/guest enumeration for Linux
+if [ "$os_type" = "windows" ]; then
+    # Guest access (domain optional)
+    echo -e "\n\033[96m[+] Checking Guest access\033[0m"
+    if [ -n "$domain" ]; then
+        guest_output=$(nxc smb $IP -d "$domain" -u 'guest' -p '' --shares)
+    else
+        guest_output=$(nxc smb $IP -u 'guest' -p '' --shares)
+    fi
+    echo "$guest_output"
     
-    if echo "$guest_output" | grep -qE "READ|WRITE"; then
-        echo -e "\n\033[92m[+] Guest SMB access successful! Suggested commands:\033[0m"
-        echo "rpcclient -U 'guest%' $IP"
-        echo ""
-        
-        # Suggest specific shares if found
-        echo "# Connect to shares:"
+    # Check if guest access succeeded and suggest commands
+    if echo "$guest_output" | grep -q "\[+\]" && ! echo "$guest_output" | grep -q "Error enumerating shares"; then
+        # Check if we actually have accessible shares
+        has_shares=false
         echo "$guest_output" | while read -r line; do
             clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
             if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
-                share=${share#\\}
-                if [ ! -z "$share" ]; then
-                    echo "smbclient -U 'guest%' //$IP/$share"
-                fi
+                has_shares=true
+                break
             fi
         done
-        echo ""
         
-        # Suggest recursive download commands
-        echo "# Download all files recursively:"
-        echo "$guest_output" | while read -r line; do
-            clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
-            if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
-                share=${share#\\}
-                if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
-                    echo "smbclient //$IP/$share -U 'guest%' -c 'prompt OFF;recurse ON;mget *'"
-                    echo "# Or with smbget: smbget -R //$IP/$share -U guest%"
+        if echo "$guest_output" | grep -qE "READ|WRITE"; then
+            echo -e "\n\033[92m[+] Guest SMB access successful! Suggested commands:\033[0m"
+            echo "rpcclient -U 'guest%' $IP"
+            echo ""
+            
+            # Suggest specific shares if found
+            echo "# Connect to shares:"
+            echo "$guest_output" | while read -r line; do
+                clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                    share=${share#\\}
+                    if [ ! -z "$share" ]; then
+                        echo "smbclient -U 'guest%' //$IP/$share"
+                    fi
                 fi
-            fi
-        done
-        echo ""
+            done
+            echo ""
+            
+            # Suggest recursive download commands
+            echo "# Download all files recursively:"
+            echo "$guest_output" | while read -r line; do
+                clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                    share=${share#\\}
+                    if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
+                        echo "smbclient //$IP/$share -U 'guest%' -c 'prompt OFF;recurse ON;mget *'"
+                        echo "# Or with smbget: smbget -R //$IP/$share -U guest%"
+                    fi
+                fi
+            done
+            echo ""
+        fi
     fi
-fi
-
-# Anonymous access (domain optional)
-echo -e "\n\033[96m[+] Checking Anonymous access\033[0m"
-if [ -n "$domain" ]; then
-    anon_output=$(nxc smb $IP -d "$domain" -u '' -p '' --shares)
+    
+    # Anonymous access (domain optional)
+    echo -e "\n\033[96m[+] Checking Anonymous access\033[0m"
+    if [ -n "$domain" ]; then
+        anon_output=$(nxc smb $IP -d "$domain" -u '' -p '' --shares)
+    else
+        anon_output=$(nxc smb $IP -u '' -p '' --shares)
+    fi
+    echo "$anon_output"
+    
+    # Check if anonymous access succeeded and suggest commands
+    if echo "$anon_output" | grep -q "\[+\]" && ! echo "$anon_output" | grep -q "Error enumerating shares"; then
+        if echo "$anon_output" | grep -qE "READ|WRITE"; then
+            echo -e "\n\033[92m[+] Anonymous SMB access successful! Suggested commands:\033[0m"
+            echo "rpcclient -U '' -N $IP"
+            echo ""
+            
+            # Suggest specific shares if found
+            echo "# Connect to shares:"
+            echo "$anon_output" | while read -r line; do
+                clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                    share=${share#\\}
+                    if [ ! -z "$share" ]; then
+                        echo "smbclient -U '' -N //$IP/$share"
+                    fi
+                fi
+            done
+            echo ""
+            
+            # Suggest recursive download commands
+            echo "# Download all files recursively:"
+            echo "$anon_output" | while read -r line; do
+                clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                    share=${share#\\}
+                    if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
+                        echo "smbclient //$IP/$share -N -c 'prompt OFF;recurse ON;mget *'"
+                        echo "# Or with smbget: smbget -R //$IP/$share -U %"
+                    fi
+                fi
+            done
+            echo ""
+        fi
+    fi
 else
-    anon_output=$(nxc smb $IP -u '' -p '' --shares)
-fi
-echo "$anon_output"
-
-# Check if anonymous access succeeded and suggest commands
-if echo "$anon_output" | grep -q "\[+\]" && ! echo "$anon_output" | grep -q "Error enumerating shares"; then
-    if echo "$anon_output" | grep -qE "READ|WRITE"; then
-        echo -e "\n\033[92m[+] Anonymous SMB access successful! Suggested commands:\033[0m"
-        echo "rpcclient -U '' -N $IP"
-        echo ""
-        
-        # Suggest specific shares if found
-        echo "# Connect to shares:"
-        echo "$anon_output" | while read -r line; do
-            clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
-            if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
-                share=${share#\\}
-                if [ ! -z "$share" ]; then
-                    echo "smbclient -U '' -N //$IP/$share"
-                fi
-            fi
-        done
-        echo ""
-        
-        # Suggest recursive download commands
-        echo "# Download all files recursively:"
-        echo "$anon_output" | while read -r line; do
-            clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
-            if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
-                share=${share#\\}
-                if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
-                    echo "smbclient //$IP/$share -N -c 'prompt OFF;recurse ON;mget *'"
-                    echo "# Or with smbget: smbget -R //$IP/$share -U %"
-                fi
-            fi
-        done
-        echo ""
-    fi
+    echo -e "\n\033[93m[!] Skipping Windows-specific Guest/Anonymous SMB checks (target OS: Linux)\033[0m"
 fi
 
 

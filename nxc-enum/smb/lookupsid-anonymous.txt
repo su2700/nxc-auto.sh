@@ -1,5 +1,5 @@
 Impacket v0.14.0.dev0+20251204.163933.2347bd3f - Copyright Fortra, LLC and its affiliated companies 
 
-[*] Brute forcing SIDs at 10.66.160.251
-[*] StringBinding ncacn_np:10.66.160.251[\pipe\lsarpc]
-[-] [Errno Connection error (10.66.160.251:445)] [Errno 111] Connection refused
+[*] Brute forcing SIDs at 10.67.185.163
+[*] StringBinding ncacn_np:10.67.185.163[\pipe\lsarpc]
+[-] [Errno Connection error (10.67.185.163:445)] [Errno 111] Connection refused
