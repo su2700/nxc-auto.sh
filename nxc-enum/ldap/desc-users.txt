@@ -1,0 +1,6 @@
+[1;34mLDAP[0m        10.67.128.30    389    ATTACKTIVEDIRECTORY [1;34m[*][0m Windows 10 / Server 2019 Build 17763 (name:ATTACKTIVEDIRECTORY) (domain:spookysec.local)
+[1;34mLDAP[0m        10.67.128.30    389    ATTACKTIVEDIRECTORY [1;32m[+][0m spookysec.local\backup:backup2517860 
+[1;36mGET-DESC...[0m 10.67.128.30    389    ATTACKTIVEDIRECTORY [1;32m[+][0m Found following users: 
+[1;36mGET-DESC...[0m 10.67.128.30    389    ATTACKTIVEDIRECTORY [1;33mUser: Administrator description: Built-in account for administering the computer/domain[0m
+[1;36mGET-DESC...[0m 10.67.128.30    389    ATTACKTIVEDIRECTORY [1;33mUser: Guest description: Built-in account for guest access to the computer/domain[0m
+[1;36mGET-DESC...[0m 10.67.128.30    389    ATTACKTIVEDIRECTORY [1;33mUser: krbtgt description: Key Distribution Center Service Account[0m

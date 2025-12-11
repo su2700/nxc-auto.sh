@@ -1,0 +1,4 @@
+[1;34mWINRM[0m       10.67.128.30    5985   ATTACKTIVEDIREC  [1;34m[*][0m Windows 10 / Server 2019 Build 17763 (name:ATTACKTIVEDIREC) (domain:spookysec.local)
+/usr/lib/python3/dist-packages/spnego/_ntlm_raw/crypto.py:46: CryptographyDeprecationWarning: ARC4 has been moved to cryptography.hazmat.decrepit.ciphers.algorithms.ARC4 and will be removed from cryptography.hazmat.primitives.ciphers.algorithms in 48.0.0.
+  arc4 = algorithms.ARC4(self._key)
+[1;34mWINRM[0m       10.67.128.30    5985   ATTACKTIVEDIREC  [1;31m[-][0m spookysec.local\backup:backup2517860

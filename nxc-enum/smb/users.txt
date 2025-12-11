@@ -1,0 +1,21 @@
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;34m[*][0m Windows 10 / Server 2019 Build 17763 x64 (name:ATTACKTIVEDIREC) (domain:spookysec.local) ([1;32msigning:True[0m) ([1;36mSMBv1:False[0m) 
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;32m[+][0m spookysec.local\backup:backup2517860 
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33m-Username-                    -Last PW Set-       -BadPW- -Description-                                               [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mAdministrator                 2020-09-17 22:53:28 0       Built-in account for administering the computer/domain [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mGuest                         <never>             0       Built-in account for guest access to the computer/domain [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mkrbtgt                        2020-04-04 18:40:08 0       Key Distribution Center Service Account [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mskidy                         2020-04-04 18:44:07 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mbreakerofthings               2020-04-04 18:51:31 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mjames                         2020-04-04 18:51:53 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33moptional                      2020-04-04 18:52:32 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33msherlocksec                   2020-04-04 18:52:56 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mdarkstar                      2020-04-04 18:53:17 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mOri                           2020-04-04 18:53:46 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mrobin                         2020-04-04 18:54:08 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mparadox                       2020-04-04 18:54:29 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mMuirland                      2020-04-04 18:55:01 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mhorshark                      2020-04-04 18:55:29 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33msvc-admin                     2020-04-04 18:57:56 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33mbackup                        2020-04-04 19:57:05 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;33ma-spooks                      2020-09-17 23:02:20 0        [0m
+[1;34mSMB[0m         10.67.128.30    445    ATTACKTIVEDIREC  [1;34m[*][0m Enumerated 17 local users: THM-AD
