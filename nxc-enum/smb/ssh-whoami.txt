@@ -1,4 +1,2 @@
-usage: nxc [-h] [--version] [-t THREADS] [--timeout TIMEOUT] [--jitter INTERVAL] [--verbose] [--debug] [--no-progress] [--log LOG] [-6] [--dns-server DNS_SERVER] [--dns-tcp]
-           [--dns-timeout DNS_TIMEOUT]
-           {mssql,nfs,vnc,rdp,winrm,smb,wmi,ftp,ssh,ldap} ...
-nxc: error: unrecognized arguments: -H 0e0363213e37b94221497260b0bcb4fc
+[1;34mSSH[0m         10.64.157.224   22     10.64.157.224    [1;34m[*][0m SSH-2.0-OpenSSH_for_Windows_7.7
+[1;34mSSH[0m         10.64.157.224   22     10.64.157.224    [1;31m[-][0m Administrator:P@796514W0rd

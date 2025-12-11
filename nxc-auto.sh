@@ -18,6 +18,10 @@ usage() {
     echo "  -H  NTLM Hash"
     echo "  -o  Target OS type: 'w' or 'windows' (default), 'l' or 'linux'"
     echo "  -h  Show this help message"
+    echo ""
+    echo "IMPORTANT: Always quote passwords and usernames with special characters!"
+    echo "  Example: $0 -i 10.0.0.1 -u 'Administrator' -p 'P@\$\$W0rd'"
+    echo "  Special characters that need quoting: \$ ! * ? & ; | < > ( ) { } [ ] \\ \` \" ' # ~"
     exit 1
 }
 
@@ -89,6 +93,13 @@ UNDERLINE='\033[4m'
 
 echo -e "\n\033[96m[+] Target OS Type:\033[0m $os_type"
 echo -e "\n\033[96m[+] Logging Enabled:\033[0m `pwd`/nxc-enum\n"
+
+# Warning about quoting passwords
+if [ -n "$pass" ]; then
+    echo -e "\033[93m[!] REMINDER: If your password contains special characters (\$ ! * etc.),"
+    echo -e "    make sure you quoted it properly: -p 'P@\$\$W0rd'\033[0m\n"
+fi
+
 mkdir -p nxc-enum nxc-enum/smb nxc-enum/ldap
 
 # Show Impacket tools suggestions if credentials provided

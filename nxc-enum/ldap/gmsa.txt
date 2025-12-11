@@ -1,2 +1,2 @@
-[1;34mLDAP[0m        10.67.139.151   389    10.67.139.151    [1;31m[-][0m LDAPs connection to ldaps://10.67.139.151 failed - (104, 'ECONNRESET')
-[1;34mLDAP[0m        10.67.139.151   389    10.67.139.151    [1;31m[-][0m Even if the port is open, LDAPS may not be configured
+[1;34mLDAP[0m        10.64.157.224   389    DOMAIN-CONTROLLER [1;34m[*][0m Windows 10 / Server 2019 Build 17763 (name:DOMAIN-CONTROLLER) (domain:CONTROLLER.local)
+[1;34mLDAPS[0m       10.64.157.224   636    DOMAIN-CONTROLLER [1;31m[-][0m CONTROLLER.local\Administrator:P@796514W0rd 
