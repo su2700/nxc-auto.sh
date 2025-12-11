@@ -1,4 +1,4 @@
-Starting enum4linux v0.9.1 ( http://labs.portcullis.co.uk/application/enum4linux/ ) on Thu Dec 11 09:33:50 2025
+Starting enum4linux v0.9.1 ( http://labs.portcullis.co.uk/application/enum4linux/ ) on Thu Dec 11 10:08:50 2025
 
 [34m =========================================( [0m[32mTarget Information[0m[34m )=========================================
 
@@ -39,5 +39,5 @@ Domain Sid: S-1-5-21-3591857110-2884097990-301047963
 [33m
 [E] [0m[31mCouldn't find users using enumdomusers: NT_STATUS_ACCESS_DENIED
 
-[0menum4linux complete on Thu Dec 11 09:34:05 2025
+[0menum4linux complete on Thu Dec 11 10:09:05 2025
 
