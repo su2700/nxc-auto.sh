@@ -1,0 +1,3 @@
+[1;34mLDAP[0m        10.67.128.30    389    ATTACKTIVEDIRECTORY [1;34m[*][0m Windows 10 / Server 2019 Build 17763 (name:ATTACKTIVEDIRECTORY) (domain:spookysec.local)
+[1;34mLDAP[0m        10.67.128.30    389    ATTACKTIVEDIRECTORY [1;32m[+][0m spookysec.local\backup:backup2517860 
+[1;34mLDAP[0m        10.67.128.30    389    ATTACKTIVEDIRECTORY [1;33mAttacktiveDirectory.spookysec.local = [0m[1;32m10.67.128.30[0m
