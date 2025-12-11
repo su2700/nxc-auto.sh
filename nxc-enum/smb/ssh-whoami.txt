@@ -1,0 +1,4 @@
+usage: nxc [-h] [--version] [-t THREADS] [--timeout TIMEOUT] [--jitter INTERVAL] [--verbose] [--debug] [--no-progress] [--log LOG] [-6] [--dns-server DNS_SERVER] [--dns-tcp]
+           [--dns-timeout DNS_TIMEOUT]
+           {mssql,nfs,vnc,rdp,winrm,smb,wmi,ftp,ssh,ldap} ...
+nxc: error: unrecognized arguments: -H 0e0363213e37b94221497260b0bcb4fc

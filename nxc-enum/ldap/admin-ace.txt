@@ -1,4 +1,4 @@
 [1;34mLDAP[0m        10.67.139.151   389    ATTACKTIVEDIRECTORY [1;34m[*][0m Windows 10 / Server 2019 Build 17763 (name:ATTACKTIVEDIRECTORY) (domain:spookysec.local)
 [1;34mLDAP[0m        10.67.139.151   389    ATTACKTIVEDIRECTORY [1;32m[+][0m spookysec.local\administrator:0e0363213e37b94221497260b0bcb4fc [1;33m(Pwn3d!)[0m
-[1;36mMAQ[0m         10.67.139.151   389    ATTACKTIVEDIRECTORY [1;34m[*][0m Getting the MachineAccountQuota
-[1;36mMAQ[0m         10.67.139.151   389    ATTACKTIVEDIRECTORY [1;33mMachineAccountQuota: 10[0m
+[1;36mDACLREAD[0m    10.67.139.151   389    ATTACKTIVEDIRECTORY [1;33mBe careful, this module cannot read the DACLS recursively.[0m
+[1;36mDACLREAD[0m    10.67.139.151   389    ATTACKTIVEDIRECTORY [1;31m[-][0m Target SID not found in LDAP (Administrator)

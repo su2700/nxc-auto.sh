@@ -565,7 +565,6 @@ check_and_suggest() {
         if [ -n "$hash" ]; then
             IMPACKET_CREDS="$domain/$user@$IP -hashes :$hash"
             WINRM_CREDS="-i $IP -u '$user' -H '$hash'"
-            LDAP_IMPACKET="impacket-ldap-shell $domain/$user@$IP -hashes :$hash"
             if [ -n "$domain" ]; then
                 SMBCLIENT_AUTH="-U '$domain\\$user' --pw-nt-hash $hash"
                 SMBGET_USER="$domain/$user%$hash"
@@ -577,7 +576,6 @@ check_and_suggest() {
         else
             IMPACKET_CREDS="$domain/$user:$pass@$IP"
             WINRM_CREDS="-i $IP -u '$user' -p '$pass'"
-            LDAP_IMPACKET="impacket-ldap-shell '$domain/$user:$pass@$IP'"
             if [ -n "$domain" ]; then
                 SMBCLIENT_AUTH="-U '$domain\\$user%$pass'"
                 SMBGET_USER="$domain/$user%$pass"
@@ -704,11 +702,33 @@ check_and_suggest() {
                 echo "vncviewer $IP"
                 ;;
             "ldap")
-                # LDAP usually doesn't have a direct interactive shell, but we can suggest ldapsearch
-                if [ -z "$hash" ]; then
-                    echo "ldapsearch -x -H ldap://$IP -D \"$user@$domain\" -w '$pass' -b \"DC=${domain//./,DC=}\""
+                # LDAP enumeration tools
+                echo -e "\n\033[96m[+] LDAP Enumeration Tools:\033[0m"
+                if [ -n "$domain" ]; then
+                    base_dn="DC=${domain//./,DC=}"
+                    if [ -n "$hash" ]; then
+                        echo "# 1. NetExec LDAP enumeration:"
+                        echo "nxc ldap $IP -d '$domain' -u '$user' -H '$hash' --users"
+                        echo "nxc ldap $IP -d '$domain' -u '$user' -H '$hash' --bloodhound -c All"
+                        echo ""
+                        echo "# 2. ldapdomaindump (requires password, not hash):"
+                        echo "# ldapdomaindump -u '$domain\\$user' -p 'PASSWORD' ldap://$IP"
+                    else
+                        echo "# 1. ldapsearch:"
+                        echo "ldapsearch -x -H ldap://$IP -D \"$user@$domain\" -w '$pass' -b \"$base_dn\" \"(objectClass=*)\""
+                        echo ""
+                        echo "# 2. ldapdomaindump:"
+                        echo "ldapdomaindump -u '$domain\\$user' -p '$pass' ldap://$IP"
+                        echo ""
+                        echo "# 3. BloodHound data collection:"
+                        echo "bloodhound-python -u '$user' -p '$pass' -d $domain -ns $IP -c All"
+                        echo ""
+                        echo "# 4. NetExec LDAP enumeration:"
+                        echo "nxc ldap $IP -d '$domain' -u '$user' -p '$pass' --users --bloodhound -c All"
+                    fi
+                else
+                    echo "# Note: Domain name required for LDAP tools. Specify with -d flag"
                 fi
-                echo "$LDAP_IMPACKET"
                 ;;
         esac
         echo ""
@@ -897,7 +917,7 @@ if [ "$os_type" = "windows" ]; then
         unbuffer nxc smb $IP $USER_FLAG --rid-brute 2>/dev/null | tee nxc-enum/smb/rid-bruteforce.txt
     
         echo -e "\n\033[96m[+] Enumerating domain groups\033[0m\n"
-        unbuffer nxc smb $IP $USER_FLAG --groups 2>/dev/null | tee nxc-enum/smb/domain-groups.txt
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --groups 2>/dev/null | tee nxc-enum/smb/domain-groups.txt
     
         echo -e "\n\033[96m[+] Enumerating local groups\033[0m\n"
         unbuffer nxc smb $IP $USER_FLAG --local-groups 2>/dev/null | tee nxc-enum/smb/local-groups.txt
@@ -1091,37 +1111,55 @@ fi
 # SSH and FTP enumeration (works for both Windows and Linux)
 if [ -n "$user" ]; then
     echo -e "\n\033[96m[+] SSH Enumeration:\033[0m"
-
-    echo -e "\n\033[91m[+] SSH Credentials Check\033[0m\n"
-    ssh_output=$(unbuffer nxc ssh $IP $USER_FLAG | tee nxc-enum/smb/ssh-credentials.txt)
-    echo "$ssh_output"
     
-    # Check if SSH access was successful and suggest connection
-    if echo "$ssh_output" | grep -q "\[+\].*Shell access"; then
-        echo -e "\n\033[92m[+] SSH access successful! Connect with:\033[0m"
-        echo "ssh -o StrictHostKeyChecking=no $user@$IP"
-        echo ""
-        echo "# Or with password in command (less secure):"
-        echo "sshpass -p '$pass' ssh -o StrictHostKeyChecking=no $user@$IP"
-        echo ""
-        echo "# Copy files from remote:"
-        echo "scp -o StrictHostKeyChecking=no $user@$IP:/path/to/file ."
-        echo ""
-        echo "# Copy files to remote:"
-        echo "scp -o StrictHostKeyChecking=no localfile $user@$IP:/path/to/destination"
-        echo ""
+    echo -e "\n\033[91m[+] SSH Credentials Check\033[0m\n"
+    # SSH doesn't support hash authentication
+    if [ -n "$pass" ]; then
+        ssh_output=$(unbuffer nxc ssh $IP -u "$user" -p "$pass" | tee nxc-enum/smb/ssh-credentials.txt)
+        echo "$ssh_output"
+        
+        # Check if SSH access was successful and suggest connection
+        if echo "$ssh_output" | grep -q "\[+\].*Shell access"; then
+            echo -e "\n\033[92m[+] SSH access successful! Connect with:\033[0m"
+            echo "ssh -o StrictHostKeyChecking=no $user@$IP"
+            echo ""
+            echo "# Or with password in command (less secure):"
+            echo "sshpass -p '$pass' ssh -o StrictHostKeyChecking=no $user@$IP"
+            echo ""
+            echo "# Copy files from remote:"
+            echo "scp -o StrictHostKeyChecking=no $user@$IP:/path/to/file ."
+            echo ""
+            echo "# Copy files to remote:"
+            echo "scp -o StrictHostKeyChecking=no localfile $user@$IP:/path/to/destination"
+            echo ""
+        fi
+    else
+        echo -e "\033[93m[!] Skipping SSH check (SSH requires password, not hash)\033[0m"
     fi
 
     echo -e "\n\033[91m[+] SSH Command Execution (whoami)\033[0m\n"
-    unbuffer nxc ssh $IP $USER_FLAG -x whoami | tee nxc-enum/smb/ssh-whoami.txt
-
+    if [ -n "$pass" ]; then
+        unbuffer nxc ssh $IP -u "$user" -p "$pass" -x "whoami" | tee nxc-enum/smb/ssh-whoami.txt
+    else
+        echo -e "\033[93m[!] Skipping (SSH requires password)\033[0m"
+    fi
+    
     echo -e "\n\033[96m[+] FTP Enumeration:\033[0m"
-
+    
     echo -e "\n\033[91m[+] FTP Credentials Check\033[0m\n"
-    timeout 5s unbuffer nxc ftp $IP $USER_FLAG | tee nxc-enum/smb/ftp-credentials.txt
-
+    # FTP doesn't support hash authentication
+    if [ -n "$pass" ]; then
+        timeout 5s unbuffer nxc ftp $IP -u "$user" -p "$pass" | tee nxc-enum/smb/ftp-credentials.txt
+    else
+        echo -e "\033[93m[!] Skipping FTP check (FTP requires password, not hash)\033[0m"
+    fi
+    
     echo -e "\n\033[91m[+] FTP Share Enumeration\033[0m\n"
-    timeout 5s unbuffer nxc ftp $IP $USER_FLAG --ls | tee nxc-enum/smb/ftp-shares.txt
+    if [ -n "$pass" ]; then
+        timeout 5s unbuffer nxc ftp $IP -u "$user" -p "$pass" --ls | tee nxc-enum/smb/ftp-shares.txt
+    else
+        echo -e "\033[93m[!] Skipping (FTP requires password)\033[0m"
+    fi
 else
     echo -e "\n\033[93m[!] Skipping SSH/FTP Enumeration (no username supplied)\033[0m"
 fi
