@@ -1,5 +1,0 @@
-Impacket v0.14.0.dev0+20251204.163933.2347bd3f - Copyright Fortra, LLC and its affiliated companies 
-
-[*] Retrieving endpoint list from 10.64.157.224
-[-] SAMR SessionError: code: 0xc0000022 - STATUS_ACCESS_DENIED - {Access Denied} A process has requested access to an object but has not been granted those access rights.
-[*] No entries received.

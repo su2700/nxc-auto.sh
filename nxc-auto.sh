@@ -954,6 +954,25 @@ if [ "$os_type" = "windows" ]; then
         unbuffer nxc smb $IP $USER_FLAG -M enum_av 2>/dev/null | tee nxc-enum/ldap/anti_virus.txt  
     
         echo -e "\n\033[96m[+] LDAP Module Enumeration:\033[0m"
+
+        echo -e "\n\033[91m[+] Running ldapdomaindump\033[0m\n"
+        mkdir -p nxc-enum/ldap/ldd
+        
+        if [ -n "$domain" ]; then
+            ldd_user="$domain\\$user"
+        else
+            ldd_user="$user"
+        fi
+        
+        if [ -n "$pass" ]; then
+            unbuffer ldapdomaindump -u "$ldd_user" -p "$pass" -o nxc-enum/ldap/ldd ldap://$IP | tee nxc-enum/ldap/ldapdomaindump.log
+        elif [ -n "$hash" ]; then
+            unbuffer ldapdomaindump -u "$ldd_user" -p "$hash" -o nxc-enum/ldap/ldd ldap://$IP | tee nxc-enum/ldap/ldapdomaindump.log
+        fi
+
+        if [ -f nxc-enum/ldap/ldd/index.html ]; then
+             echo -e "\033[92m[+] ldapdomaindump report saved to: nxc-enum/ldap/ldd/index.html\033[0m"
+        fi
     
         echo -e "\n\033[91m[+] Machine Account Quota (maq)\033[0m\n"
         unbuffer nxc ldap $IP $USER_FLAG --users -M maq 2>/dev/null | tee nxc-enum/ldap/maq.txt

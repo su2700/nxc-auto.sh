@@ -1,9 +1,0 @@
-Administrator
-Guest
-krbtgt
-Machine1
-Admin2
-Machine2
-SQLService
-POST
-sshd

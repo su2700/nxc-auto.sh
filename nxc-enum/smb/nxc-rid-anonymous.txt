@@ -1,3 +1,0 @@
-SMB                      10.64.157.224   445    DOMAIN-CONTROLL  [*] Windows 10 / Server 2019 Build 17763 x64 (name:DOMAIN-CONTROLL) (domain:CONTROLLER.local) (signing:True) (SMBv1:False) 
-SMB                      10.64.157.224   445    DOMAIN-CONTROLL  [+] CONTROLLER.local\: 
-SMB                      10.64.157.224   445    DOMAIN-CONTROLL  [-] Error connecting: LSAD SessionError: code: 0xc0000022 - STATUS_ACCESS_DENIED - {Access Denied} A process has requested access to an object but has not been granted those access rights.

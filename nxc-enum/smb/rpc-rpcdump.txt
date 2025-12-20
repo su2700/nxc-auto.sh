@@ -1,2 +1,0 @@
-Impacket v0.13.0.dev0 - Copyright Fortra, LLC and its affiliated companies 
-
