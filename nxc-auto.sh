@@ -830,7 +830,11 @@ if [ "$os_type" = "windows" ]; then
             fi
             echo ""
             echo "# Or with rdesktop:"
-            echo "rdesktop -u $user -p '$pass' -d $domain $IP"
+            if [ -n "$domain" ]; then
+                echo "rdesktop -u $user -p '$pass' -d $domain $IP"
+            else
+                echo "rdesktop -u $user -p '$pass' $IP"
+            fi
             echo ""
         fi
     else
