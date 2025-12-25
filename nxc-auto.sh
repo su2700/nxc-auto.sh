@@ -71,7 +71,7 @@ if [ -n "$user" ]; then
         RPCDUMP_ARG="-u $user -p $pass -d $domain"
     else
         # Username only, no password - use -N for null session
-        USER_FLAG="-u $user"
+        USER_FLAG="-u $user -p ''"
         RPC_ARG="-U $domain\\\\\\\\$user -N"
         SECRETS_ARG="$domain/$user@$IP"
         RPCDUMP_ARG="-u $user -d $domain"
@@ -79,6 +79,7 @@ if [ -n "$user" ]; then
 else
     USER_FLAG=""
     RPC_ARG="-U '' -N"
+    RPCDUMP_ARG="" # Define RPCDUMP_ARG for anonymous scans
 fi
 
 HEADER='\033[95m'
@@ -350,12 +351,24 @@ fi
 if [ "$os_type" = "windows" ]; then
     echo -e "\n\033[96m[+] Anonymous RPC User Enumeration (lookupsid.py)\033[0m"
     echo "# Attempting anonymous SID bruteforce to enumerate users..."
+    # Try anonymous first
     lookupsid_output=$(timeout 30s lookupsid.py -no-pass anonymous@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-anonymous.txt)
+    
+    # If anonymous failed to find users, try guest
+    if ! echo "$lookupsid_output" | grep -q "SidTypeUser"; then
+        echo -e "\n\033[93m[!] Anonymous lookupsid failed, trying with 'guest' account...\033[0m"
+        lookupsid_output=$(timeout 30s lookupsid.py -no-pass guest@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-guest.txt)
+        if echo "$lookupsid_output" | grep -q "SidTypeUser"; then
+             echo -e "\n\033[92m[+] Successfully enumerated users via 'guest' account!\033[0m"
+             # combine outputs for parsing later
+             cat nxc-enum/smb/lookupsid-guest.txt >> nxc-enum/smb/lookupsid-anonymous.txt
+        fi
+    fi
     echo "$lookupsid_output"
     
     # Check if lookupsid found users
     if echo "$lookupsid_output" | grep -q "SidTypeUser\|SidTypeGroup"; then
-        echo -e "\n\033[92m[+] Successfully enumerated users/groups via anonymous RPC!\033[0m"
+        echo -e "\n\033[92m[+] Successfully enumerated users/groups via RPC!\033[0m"
         echo "# Results saved to: nxc-enum/smb/lookupsid-anonymous.txt"
         echo ""
         
@@ -379,10 +392,18 @@ if [ "$os_type" = "windows" ]; then
         echo -e "\n\033[93m[!] lookupsid.py didn't find users, trying alternative tools...\033[0m"
     fi
     
-    # Alternative Tool 1: NetExec RID Brute (anonymous)
+    # Alternative Tool 1: NetExec RID Brute (anonymous & guest)
     echo -e "\n\033[96m[+] Trying NetExec RID Brute (anonymous)\033[0m"
     nxc_rid_output=$(timeout 15s nxc smb $IP -u '' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-anonymous.txt)
     echo "$nxc_rid_output"
+
+    echo -e "\n\033[96m[+] Trying NetExec RID Brute (guest)\033[0m"
+    if [ -n "$domain" ]; then
+        nxc_rid_guest_output=$(timeout 15s nxc smb $IP -d "$domain" -u 'guest' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-guest.txt)
+    else
+        nxc_rid_guest_output=$(timeout 15s nxc smb $IP -u 'guest' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-guest.txt)
+    fi
+    echo "$nxc_rid_guest_output"
     
     # Alternative Tool 2: rpcclient enumdomusers
     echo -e "\n\033[96m[+] Trying rpcclient enumdomusers (anonymous)\033[0m"
@@ -416,7 +437,11 @@ if [ "$os_type" = "windows" ]; then
         
         # Try nxc output
         if echo "$nxc_rid_output" | grep -q "SidTypeUser"; then
-            echo "$nxc_rid_output" | grep "SidTypeUser" | awk '{print $NF}' | grep -v '\$$' > "$users_file"
+            echo "$nxc_rid_output" | grep "SidTypeUser" | awk -F'\\\\' '{print $2}' | awk '{print $1}' | grep -v '\$$' >> "$users_file"
+        fi
+        
+        if echo "$nxc_rid_guest_output" | grep -q "SidTypeUser"; then
+            echo "$nxc_rid_guest_output" | grep "SidTypeUser" | awk -F'\\\\' '{print $2}' | awk '{print $1}' | grep -v '\$$' >> "$users_file"
         fi
         
         # Try rpcclient output
@@ -912,7 +937,7 @@ if [ "$os_type" = "windows" ]; then
     fi
     
     echo -e "\n\033[96m[+] RPC Endpoint Dump (impacket-rpcdump)\033[0m\n"
-    impacket-rpcdump "$IP" $RPCDUMP_ARG 2>/dev/null | tee nxc-enum/smb/rpc-rpcdump.txt # Query RPC endpoint information
+    impacket-rpcdump "$IP" $RPCDUMP_ARG 2>/dev/null | tee nxc-enum/rpc_endpoints.txt # Query RPC endpoint information
     
     if [ -n "$user" ]; then
         echo -e "\n\033[96m[+] WinRM Enumeration:\033[0m"
