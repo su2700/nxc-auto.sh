@@ -352,12 +352,20 @@ if [ "$os_type" = "windows" ]; then
     echo -e "\n\033[96m[+] Anonymous RPC User Enumeration (lookupsid.py)\033[0m"
     echo "# Attempting anonymous SID bruteforce to enumerate users..."
     # Try anonymous first
-    lookupsid_output=$(timeout 30s lookupsid.py -no-pass anonymous@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-anonymous.txt)
+    # Try impacket-lookupsid first
+    lookupsid_output=$(timeout 30s impacket-lookupsid -no-pass anonymous@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-anonymous.txt)
+    # Fallback to lookupsid.py if failed
+    if [ ! -s nxc-enum/smb/lookupsid-anonymous.txt ]; then
+        lookupsid_output=$(timeout 30s lookupsid.py -no-pass anonymous@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-anonymous.txt)
+    fi
     
     # If anonymous failed to find users, try guest
     if ! echo "$lookupsid_output" | grep -q "SidTypeUser"; then
         echo -e "\n\033[93m[!] Anonymous lookupsid failed, trying with 'guest' account...\033[0m"
-        lookupsid_output=$(timeout 30s lookupsid.py -no-pass guest@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-guest.txt)
+        lookupsid_output=$(timeout 30s impacket-lookupsid -no-pass guest@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-guest.txt)
+        if [ ! -s nxc-enum/smb/lookupsid-guest.txt ]; then
+            lookupsid_output=$(timeout 30s lookupsid.py -no-pass guest@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-guest.txt)
+        fi
         if echo "$lookupsid_output" | grep -q "SidTypeUser"; then
              echo -e "\n\033[92m[+] Successfully enumerated users via 'guest' account!\033[0m"
              # combine outputs for parsing later
@@ -410,9 +418,12 @@ if [ "$os_type" = "windows" ]; then
     rpcclient_output=$(rpcclient -U '' -N $IP -c 'enumdomusers' 2>/dev/null | tee nxc-enum/smb/rpcclient-enumdomusers.txt)
     echo "$rpcclient_output"
     
-    # Alternative Tool 3: samrdump.py
-    echo -e "\n\033[96m[+] Trying samrdump.py (anonymous)\033[0m"
-    samrdump_output=$(timeout 15s samrdump.py $IP 2>/dev/null | tee nxc-enum/smb/samrdump-anonymous.txt)
+    # Alternative Tool 3: samrdump
+    echo -e "\n\033[96m[+] Trying samrdump (anonymous)\033[0m"
+    samrdump_output=$(timeout 15s impacket-samrdump $IP 2>/dev/null | tee nxc-enum/smb/samrdump-anonymous.txt)
+    if [ ! -s nxc-enum/smb/samrdump-anonymous.txt ]; then
+         samrdump_output=$(timeout 15s samrdump.py $IP 2>/dev/null | tee nxc-enum/smb/samrdump-anonymous.txt)
+    fi
     echo "$samrdump_output"
     
     # Alternative Tool 4: enum4linux (if installed)
@@ -485,7 +496,10 @@ if [ "$os_type" = "windows" ]; then
         
         if [ -n "$domain_name" ] && [ "$domain_name" != "DOMAIN" ]; then
             echo "# Using domain: $domain_name"
-            getnpusers_output=$(GetNPUsers.py "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null | tee nxc-enum/smb/asrep-getnpusers.txt)
+            getnpusers_output=$(impacket-GetNPUsers "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null | tee nxc-enum/smb/asrep-getnpusers.txt)
+            if [ -z "$getnpusers_output" ]; then
+                getnpusers_output=$(GetNPUsers.py "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null | tee nxc-enum/smb/asrep-getnpusers.txt)
+            fi
             echo "$getnpusers_output"
             
             # Check if any AS-REP roastable users were found
@@ -928,7 +942,10 @@ if [ "$os_type" = "windows" ]; then
         # secretsdump requires actual credentials
         if [ -n "$pass" ] || [ -n "$hash" ]; then
             echo -e "\n\033[96m[+] RPC Secrets Dump (impacket-secretsdump)\033[0m\n"
-            impacket-secretsdump $SECRETS_ARG 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt # Dump SAM hashes via RPC
+            impacket-secretsdump $SECRETS_ARG 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt
+            if [ ! -s nxc-enum/smb/rpc-secretsdump.txt ]; then
+                secretsdump.py $SECRETS_ARG 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt
+            fi
         else
             echo -e "\n\033[93m[!] Skipping RPC Secrets Dump (requires password/hash)\033[0m"
         fi
@@ -937,7 +954,12 @@ if [ "$os_type" = "windows" ]; then
     fi
     
     echo -e "\n\033[96m[+] RPC Endpoint Dump (impacket-rpcdump)\033[0m\n"
-    impacket-rpcdump "$IP" $RPCDUMP_ARG 2>/dev/null | tee nxc-enum/rpc_endpoints.txt # Query RPC endpoint information
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    impacket-rpcdump "$IP" $RPCDUMP_ARG 2>/dev/null > "nxc-enum/rpc_endpoints_${timestamp}.txt"
+    if [ ! -s "nxc-enum/rpc_endpoints_${timestamp}.txt" ]; then
+        rpcdump.py "$IP" $RPCDUMP_ARG 2>/dev/null > "nxc-enum/rpc_endpoints_${timestamp}.txt"
+    fi
+    echo "# Results saved to: nxc-enum/rpc_endpoints_${timestamp}.txt"
     
     if [ -n "$user" ]; then
         echo -e "\n\033[96m[+] WinRM Enumeration:\033[0m"
