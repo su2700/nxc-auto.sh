@@ -402,9 +402,9 @@ if [ "$os_type" = "windows" ]; then
 
     # Alternative Tool 5: enum4linux-ng (if installed)
     if command -v enum4linux-ng &> /dev/null; then
-        echo -e "\n\033[96m[+] Trying enum4linux-ng (anonymous)\033[0m"
-        # -U for users, -R for RID cycle
-        timeout 45s enum4linux-ng -U -R $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-ng-users.txt
+        echo -e "\n\033[96m[+] Trying enum4linux-ng (anonymous - MAX INFO)\033[0m"
+        # -A (All), -R (RID Cycle), -d (Detailed)
+        timeout 600s enum4linux-ng -A -R -d $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-ng-anonymous.txt
     fi
     
     # Check if we got users from any tool and create users file if not already created
@@ -1137,11 +1137,12 @@ if [ "$os_type" = "windows" ]; then
 
         # enum4linux-ng Authenticated Scan
         if command -v enum4linux-ng &> /dev/null; then
-            echo -e "\n\033[96m[+] Running enum4linux-ng (Authenticated)\033[0m"
+            echo -e "\n\033[96m[+] Running enum4linux-ng (Authenticated - MAX INFO)\033[0m"
+            echo "    Running with -A (All), -R (RID Cycle), -d (Detailed)"
             if [ -n "$hash" ]; then
-                timeout 120s enum4linux-ng -u "$user" -H "$hash" -A $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-ng-auth.txt
+                timeout 600s enum4linux-ng -u "$user" -H "$hash" -A -R -d $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-ng-auth.txt
             elif [ -n "$pass" ]; then
-                timeout 120s enum4linux-ng -u "$user" -p "$pass" -A $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-ng-auth.txt
+                timeout 600s enum4linux-ng -u "$user" -p "$pass" -A -R -d $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-ng-auth.txt
             fi
         fi
     else
