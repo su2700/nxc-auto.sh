@@ -1,0 +1,8 @@
+Impacket v0.13.0.dev0 - Copyright Fortra, LLC and its affiliated companies 
+
+[*] Retrieving endpoint list from 10.82.153.171
+Found domain(s):
+ . KENOBI
+ . Builtin
+[*] Looking up users in domain KENOBI
+[*] No entries received.

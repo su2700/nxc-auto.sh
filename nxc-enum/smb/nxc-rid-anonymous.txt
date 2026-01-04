@@ -1,0 +1,3 @@
+SMB                      10.82.153.171   445    KENOBI           [*] Unix - Samba (name:KENOBI) (domain:KENOBI) (signing:False) (SMBv1:False)
+SMB                      10.82.153.171   445    KENOBI           [+] KENOBI\: 
+SMB                      10.82.153.171   445    KENOBI           [-] RPC lookup failed: RPC method not implemented

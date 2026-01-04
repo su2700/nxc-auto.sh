@@ -1,0 +1,202 @@
+[92mENUM4LINUX - next generation (v1.3.7)[0m
+
+ ==========================
+|    Target Information    |
+ ==========================
+[94m[*] Target ........... 10.82.153.171[0m
+[94m[*] Username ......... ''[0m
+[94m[*] Random Username .. 'oxdletse'[0m
+[94m[*] Password ......... ''[0m
+[94m[*] Timeout .......... 5 second(s)[0m
+[94m[*] RID Range(s) ..... 500-550,1000-1050[0m
+[94m[*] RID Req Size ..... 1[0m
+[94m[*] Known Usernames .. 'administrator,guest,krbtgt,domain admins,root,bin,none'[0m
+
+ ======================================
+|    Listener Scan on 10.82.153.171    |
+ ======================================
+[94m[*] Checking LDAP[0m
+[91m[-] Could not connect to LDAP on 389/tcp: connection refused[0m
+[94m[*] Checking LDAPS[0m
+[91m[-] Could not connect to LDAPS on 636/tcp: connection refused[0m
+[94m[*] Checking SMB[0m
+[92m[+] SMB is accessible on 445/tcp[0m
+[94m[*] Checking SMB over NetBIOS[0m
+[92m[+] SMB over NetBIOS is accessible on 139/tcp[0m
+
+ ============================================================
+|    NetBIOS Names and Workgroup/Domain for 10.82.153.171    |
+ ============================================================
+[92m[+] Got domain/workgroup name: WORKGROUP[0m
+[92m[+] Full NetBIOS names information:
+- KENOBI          <00> -         B <ACTIVE>  Workstation Service
+- KENOBI          <03> -         B <ACTIVE>  Messenger Service
+- KENOBI          <20> -         B <ACTIVE>  File Server Service
+- ..__MSBROWSE__. <01> - <GROUP> B <ACTIVE>  Master Browser
+- WORKGROUP       <00> - <GROUP> B <ACTIVE>  Domain/Workgroup Name
+- WORKGROUP       <1d> -         B <ACTIVE>  Master Browser
+- WORKGROUP       <1e> - <GROUP> B <ACTIVE>  Browser Service Elections
+- MAC Address = 00-00-00-00-00-00[0m
+
+ ==========================================
+|    SMB Dialect Check on 10.82.153.171    |
+ ==========================================
+[94m[*] Trying on 445/tcp[0m
+[92m[+] Supported dialects and settings:
+Supported dialects:
+  SMB 1.0: false
+  SMB 2.0.2: true
+  SMB 2.1: true
+  SMB 3.0: true
+  SMB 3.1.1: true
+Preferred dialect: SMB 3.0
+SMB1 only: false
+SMB signing required: false[0m
+
+ ============================================================
+|    Domain Information via SMB session for 10.82.153.171    |
+ ============================================================
+[94m[*] Enumerating via unauthenticated SMB session on 445/tcp[0m
+[92m[+] Found domain information via SMB
+NetBIOS computer name: KENOBI
+NetBIOS domain name: ''
+DNS domain: ''
+FQDN: kenobi
+Derived membership: workgroup member
+Derived domain: unknown[0m
+
+ ==========================================
+|    RPC Session Check on 10.82.153.171    |
+ ==========================================
+[94m[*] Check for anonymous access (null session)[0m
+[92m[+] Server allows authentication via username '' and password ''[0m
+[94m[*] Check for guest access[0m
+[92m[+] Server allows authentication via username 'oxdletse' and password ''[0m
+[92m[H] Rerunning enumeration with user 'oxdletse' might give more results[0m
+
+ ====================================================
+|    Domain Information via RPC for 10.82.153.171    |
+ ====================================================
+[92m[+] Domain: WORKGROUP[0m
+[92m[+] Domain SID: NULL SID[0m
+[92m[+] Membership: workgroup member[0m
+
+ ================================================
+|    OS Information via RPC for 10.82.153.171    |
+ ================================================
+[94m[*] Enumerating via unauthenticated SMB session on 445/tcp[0m
+[92m[+] Found OS information via SMB[0m
+[94m[*] Enumerating via 'srvinfo'[0m
+[92m[+] Found OS information via 'srvinfo'[0m
+[92m[+] After merging OS information we have the following result:
+OS: Linux/Unix
+OS version: '6.1'
+OS release: ''
+OS build: '0'
+Native OS: not supported
+Native LAN manager: not supported
+Platform id: '500'
+Server type: '0x809a03'
+Server type string: Wk Sv PrQ Unx NT SNT kenobi server (Samba, Ubuntu)[0m
+
+ ======================================
+|    Users via RPC on 10.82.153.171    |
+ ======================================
+[94m[*] Enumerating users via 'querydispinfo'[0m
+[92m[+] Found 0 user(s) via 'querydispinfo'[0m
+[94m[*] Enumerating users via 'enumdomusers'[0m
+[92m[+] Found 0 user(s) via 'enumdomusers'[0m
+
+ =======================================
+|    Groups via RPC on 10.82.153.171    |
+ =======================================
+[94m[*] Enumerating local groups[0m
+[92m[+] Found 0 group(s) via 'enumalsgroups domain'[0m
+[94m[*] Enumerating builtin groups[0m
+[92m[+] Found 0 group(s) via 'enumalsgroups builtin'[0m
+[94m[*] Enumerating domain groups[0m
+[92m[+] Found 0 group(s) via 'enumdomgroups'[0m
+
+ =======================================
+|    Shares via RPC on 10.82.153.171    |
+ =======================================
+[94m[*] Enumerating shares[0m
+[92m[+] Found 3 share(s):
+IPC$:
+  comment: IPC Service (kenobi server (Samba, Ubuntu))
+  type: IPC
+anonymous:
+  comment: ''
+  type: Disk
+print$:
+  comment: Printer Drivers
+  type: Disk[0m
+[94m[*] Testing share IPC$[0m
+[91m[-] Could not check share: STATUS_OBJECT_NAME_NOT_FOUND[0m
+[94m[*] Testing share anonymous[0m
+[92m[+] Mapping: OK, Listing: OK[0m
+[94m[*] Testing share print$[0m
+[92m[+] Mapping: DENIED, Listing: N/A[0m
+
+ ==========================================
+|    Policies via RPC for 10.82.153.171    |
+ ==========================================
+[94m[*] Trying port 445/tcp[0m
+[92m[+] Found policy:
+Domain password information:
+  Password history length: None
+  Minimum password length: 5
+  Minimum password age: none
+  Maximum password age: 49710 days (136 years) 6 hours 21 minutes
+  Password properties:
+  - DOMAIN_PASSWORD_COMPLEX: false
+  - DOMAIN_PASSWORD_NO_ANON_CHANGE: false
+  - DOMAIN_PASSWORD_NO_CLEAR_CHANGE: false
+  - DOMAIN_PASSWORD_LOCKOUT_ADMINS: false
+  - DOMAIN_PASSWORD_PASSWORD_STORE_CLEARTEXT: false
+  - DOMAIN_PASSWORD_REFUSE_PASSWORD_CHANGE: false
+Domain lockout information:
+  Lockout observation window: 30 minutes
+  Lockout duration: 30 minutes
+  Lockout threshold: None
+Domain logoff information:
+  Force logoff time: 49710 days (136 years) 6 hours 21 minutes[0m
+
+ ==========================================
+|    Printers via RPC for 10.82.153.171    |
+ ==========================================
+[92m[+] No printers returned (this is not an error)[0m
+
+ ===================================================================
+|    Users, Groups and Machines on 10.82.153.171 via RID Cycling    |
+ ===================================================================
+[94m[*] Trying to enumerate SIDs[0m
+[92m[+] Found 3 SID(s)[0m
+[94m[*] Trying SID S-1-22-1[0m
+[92m[+] Found user 'Unix User\kenobi' (RID 1000)[0m
+[91m[-] Could not find details for user 'Unix User\kenobi': STATUS_NO_SUCH_USER[0m
+[92m[+] Found user 'Unix User\ubuntu' (RID 1001)[0m
+[91m[-] Could not find details for user 'Unix User\ubuntu': STATUS_NO_SUCH_USER[0m
+[94m[*] Trying SID S-1-5-21-55073928-793008161-2116500600[0m
+[92m[+] Found user 'KENOBI\nobody' (RID 501)[0m
+[92m[+] Found details for user 'KENOBI\nobody' (RID 501)[0m
+[92m[+] Found domain group 'KENOBI\None' (RID 513)[0m
+[92m[+] Found details for domain group 'KENOBI\None' (RID 513)[0m
+[94m[*] Trying SID S-1-5-32[0m
+[92m[+] Found builtin group 'BUILTIN\Administrators' (RID 544)[0m
+[91m[-] Could not get details for builtin group 'BUILTIN\Administrators' (RID 544): STATUS_NO_SUCH_GROUP[0m
+[92m[+] Found builtin group 'BUILTIN\Users' (RID 545)[0m
+[91m[-] Could not get details for builtin group 'BUILTIN\Users' (RID 545): STATUS_NO_SUCH_GROUP[0m
+[92m[+] Found builtin group 'BUILTIN\Guests' (RID 546)[0m
+[91m[-] Could not get details for builtin group 'BUILTIN\Guests' (RID 546): STATUS_NO_SUCH_GROUP[0m
+[92m[+] Found builtin group 'BUILTIN\Power Users' (RID 547)[0m
+[91m[-] Could not get details for builtin group 'BUILTIN\Power Users' (RID 547): STATUS_NO_SUCH_GROUP[0m
+[92m[+] Found builtin group 'BUILTIN\Account Operators' (RID 548)[0m
+[91m[-] Could not get details for builtin group 'BUILTIN\Account Operators' (RID 548): STATUS_NO_SUCH_GROUP[0m
+[92m[+] Found builtin group 'BUILTIN\Server Operators' (RID 549)[0m
+[91m[-] Could not get details for builtin group 'BUILTIN\Server Operators' (RID 549): STATUS_NO_SUCH_GROUP[0m
+[92m[+] Found builtin group 'BUILTIN\Print Operators' (RID 550)[0m
+[91m[-] Could not get details for builtin group 'BUILTIN\Print Operators' (RID 550): STATUS_NO_SUCH_GROUP[0m
+[92m[+] Found 3 user(s), 8 group(s), 0 machine(s) in total[0m
+
+Completed after 256.11 seconds
