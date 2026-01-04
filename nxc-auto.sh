@@ -45,6 +45,36 @@ while getopts "i:u:p:d:H:o:h" opt; do
     esac
 done
 
+# Function to check if a port is open (uses nc if available, falls back to /dev/tcp)
+check_port() {
+    target_ip=$1
+    target_port=$2
+    service_name=$3
+    
+    # Skip check if we don't know the IP (shouldn't happen)
+    if [ -z "$target_ip" ]; then return 0; fi
+
+    # Use nc if available
+    if command -v nc &> /dev/null; then
+        nc -z -w 1 "$target_ip" "$target_port" 2>/dev/null
+        result=$?
+    else
+        # Fallback to bash pseudo-device
+        (timeout 1 bash -c "</dev/tcp/$target_ip/$target_port") 2>/dev/null
+        result=$?
+    fi
+
+    if [ $result -eq 0 ]; then
+        return 0 # Port is open
+    else
+        if [ -n "$service_name" ]; then
+             echo -e "\n\033[93m[!] Skipping $service_name checks (Port $target_port seems closed)\033[0m"
+        fi
+        return 1 # Port is closed
+    fi
+}
+
+
 # Check if IP is set
 if [ -z "$IP" ]; then
     echo "Error: IP address is required."
@@ -228,6 +258,12 @@ echo -e "\n\033[96m[+] OS info, Name, Domain, SMB versions\033[0m\n"
 
 # Skip Windows-specific LDAP/AD checks for Linux targets
 if [ "$os_type" = "windows" ]; then
+    # Helper: Check SMB port (445) first
+    if ! check_port $IP 445 "SMB/LDAP"; then
+        echo -e "\033[91m[!] Warning: Port 445 closed. Enumeration might fail.\033[0m"
+        # We don't exit, just warn, in case of firewalls or non-standard ports
+    fi
+
     # LDAP domain SID (requires credentials)
     if [ -n "$user" ]; then
         unbuffer nxc ldap $IP $USER_FLAG --get-sid --users | tee nxc-enum/ldap/domain-sid.txt
@@ -801,8 +837,12 @@ if [ "$os_type" = "windows" ]; then
     
     # SMB (anonymous allowed, domain optional)
     # Added --shares to check shares in one go
-    smb_output=$(check_and_suggest smb nxc smb $IP $DOMAIN_FLAG $USER_FLAG --shares --timeout 2)
-    echo "$smb_output"
+    if check_port $IP 445; then
+        smb_output=$(check_and_suggest smb nxc smb $IP $DOMAIN_FLAG $USER_FLAG --shares --timeout 2)
+        echo "$smb_output"
+    else
+        smb_output="" # Empty output if closed
+    fi
     
     # Check for SMB signing status
     if echo "$smb_output" | grep -q "signing:True"; then
@@ -861,27 +901,31 @@ if [ "$os_type" = "windows" ]; then
     
     # RDP check (requires username)
     if [ -n "$user" ]; then
-        echo -e "\n\033[96m[+] RDP Enumeration:\033[0m"
-        echo -e "\n\033[91m[+] RDP Credentials Check\033[0m\n"
-        rdp_output=$(check_and_suggest rdp nxc rdp $IP $DOMAIN_FLAG $USER_FLAG)
-        echo "$rdp_output"
-        
-        # Check if RDP access was successful
-        if echo "$rdp_output" | grep -q "\[+\]"; then
-            echo -e "\n\033[92m[+] RDP access successful! Connect with:\033[0m"
-            if [ -n "$domain" ]; then
-                echo "xfreerdp3 /v:$IP /u:$domain\\\\$user $XFREERDP_PASS /cert:ignore /clipboard /dynamic-resolution"
-            else
-                echo "xfreerdp3 /v:$IP /u:$user $XFREERDP_PASS /cert:ignore /clipboard /dynamic-resolution"
+        if check_port $IP 3389; then
+            echo -e "\n\033[96m[+] RDP Enumeration:\033[0m"
+            echo -e "\n\033[91m[+] RDP Credentials Check\033[0m\n"
+            rdp_output=$(check_and_suggest rdp nxc rdp $IP $DOMAIN_FLAG $USER_FLAG)
+            echo "$rdp_output"
+            
+            # Check if RDP access was successful
+            if echo "$rdp_output" | grep -q "\[+\]"; then
+                echo -e "\n\033[92m[+] RDP access successful! Connect with:\033[0m"
+                if [ -n "$domain" ]; then
+                    echo "xfreerdp3 /v:$IP /u:$domain\\\\$user $XFREERDP_PASS /cert:ignore /clipboard /dynamic-resolution"
+                else
+                    echo "xfreerdp3 /v:$IP /u:$user $XFREERDP_PASS /cert:ignore /clipboard /dynamic-resolution"
+                fi
+                echo ""
+                echo "# Or with rdesktop:"
+                if [ -n "$domain" ]; then
+                    echo "rdesktop -u $user -p '$pass' -d $domain $IP"
+                else
+                    echo "rdesktop -u $user -p '$pass' $IP"
+                fi
+                echo ""
             fi
-            echo ""
-            echo "# Or with rdesktop:"
-            if [ -n "$domain" ]; then
-                echo "rdesktop -u $user -p '$pass' -d $domain $IP"
-            else
-                echo "rdesktop -u $user -p '$pass' $IP"
-            fi
-            echo ""
+        else
+            echo -e "\n\033[93m[!] Skipping RDP check (Port 3389 closed)\033[0m"
         fi
     else
         echo -e "\n\033[93m[!] Skipping RDP check (no username supplied)\033[0m"
@@ -962,12 +1006,16 @@ if [ "$os_type" = "windows" ]; then
     echo "# Results saved to: nxc-enum/rpc_endpoints_${timestamp}.txt"
     
     if [ -n "$user" ]; then
-        echo -e "\n\033[96m[+] WinRM Enumeration:\033[0m"
-        echo -e "\n\033[91m[+] WinRM Credentials Check\033[0m\n"
-        check_and_suggest winrm nxc winrm $IP $DOMAIN_FLAG $USER_FLAG | tee nxc-enum/smb/winrm-credentials.txt
-    
-        echo -e "\n\033[91m[+] WinRM Command Execution (whoami)\033[0m\n"
-        unbuffer nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami | tee nxc-enum/smb/winrm-whoami.txt
+        if check_port $IP 5985 || check_port $IP 5986; then
+            echo -e "\n\033[96m[+] WinRM Enumeration:\033[0m"
+            echo -e "\n\033[91m[+] WinRM Credentials Check\033[0m\n"
+            check_and_suggest winrm nxc winrm $IP $DOMAIN_FLAG $USER_FLAG | tee nxc-enum/smb/winrm-credentials.txt
+        
+            echo -e "\n\033[91m[+] WinRM Command Execution (whoami)\033[0m\n"
+            unbuffer nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami | tee nxc-enum/smb/winrm-whoami.txt
+        else
+            echo -e "\n\033[93m[!] Skipping WinRM check (Ports 5985/5986 closed)\033[0m"
+        fi
     else
         echo -e "\n\033[93m[!] Skipping WinRM Enumeration (no username supplied)\033[0m"
     fi
@@ -1147,14 +1195,16 @@ if [ "$os_type" = "windows" ]; then
     
         echo -e "\n\033[96m[+] MSSQL Enumeration:\033[0m"
     
-        echo -e "\n\033[91m[+] MSSQL Info\033[0m\n"
-        unbuffer nxc mssql $IP $USER_FLAG | tee nxc-enum/smb/mssql-info.txt
-    
-        echo -e "\n\033[91m[+] MSSQL Query (xp_dirtree)\033[0m\n"
-        unbuffer nxc mssql $IP $USER_FLAG -x 'EXEC xp_dirtree "C:\\", 1;' | tee nxc-enum/smb/mssql-xp-dirtree.txt
-    
-        echo -e "\n\033[91m[+] MSSQL Query (sp_databases)\033[0m\n"
-        unbuffer nxc mssql $IP $USER_FLAG -x 'EXEC sp_databases;' | tee nxc-enum/smb/mssql-databases.txt
+        if check_port $IP 1433 "MSSQL"; then
+            echo -e "\n\033[91m[+] MSSQL Info\033[0m\n"
+            unbuffer nxc mssql $IP $USER_FLAG | tee nxc-enum/smb/mssql-info.txt
+        
+            echo -e "\n\033[91m[+] MSSQL Query (xp_dirtree)\033[0m\n"
+            unbuffer nxc mssql $IP $USER_FLAG -x 'EXEC xp_dirtree "C:\\", 1;' | tee nxc-enum/smb/mssql-xp-dirtree.txt
+        
+            echo -e "\n\033[91m[+] MSSQL Query (sp_databases)\033[0m\n"
+            unbuffer nxc mssql $IP $USER_FLAG -x 'EXEC sp_databases;' | tee nxc-enum/smb/mssql-databases.txt
+        fi
         
         echo -e "\n\033[96m[+] VNC Enumeration:\033[0m"
     
@@ -1169,10 +1219,15 @@ if [ "$os_type" = "windows" ]; then
         echo -e "\n\033[96m[+] WMI Enumeration:\033[0m"
     
         echo -e "\n\033[91m[+] WMI Credentials Check\033[0m\n"
-        check_and_suggest wmi nxc wmi $IP $USER_FLAG | tee nxc-enum/smb/wmi-credentials.txt
+        # WMI uses RPC (135) and dynamic ports. We check 135.
+        if check_port $IP 135 "WMI (RPC)"; then
+             check_and_suggest wmi nxc wmi $IP $USER_FLAG | tee nxc-enum/smb/wmi-credentials.txt
     
-        echo -e "\n\033[91m[+] WMI Command Execution (whoami)\033[0m\n"
-        unbuffer nxc wmi $IP $USER_FLAG -x whoami | tee nxc-enum/smb/wmi-whoami.txt
+             echo -e "\n\033[91m[+] WMI Command Execution (whoami)\033[0m\n"
+             unbuffer nxc wmi $IP $USER_FLAG -x whoami | tee nxc-enum/smb/wmi-whoami.txt
+        else
+             echo -e "\n\033[93m[!] Skipping WMI check (Port 135 closed)\033[0m"
+        fi
     
         echo -e "\n\033[96m[+] SMB Additional Enumeration:\033[0m"
     
@@ -1207,23 +1262,25 @@ if [ -n "$user" ]; then
     echo -e "\n\033[91m[+] SSH Credentials Check\033[0m\n"
     # SSH doesn't support hash authentication
     if [ -n "$pass" ]; then
-        ssh_output=$(unbuffer nxc ssh $IP -u "$user" -p "$pass" | tee nxc-enum/smb/ssh-credentials.txt)
-        echo "$ssh_output"
-        
-        # Check if SSH access was successful and suggest connection
-        if echo "$ssh_output" | grep -q "\[+\].*Shell access"; then
-            echo -e "\n\033[92m[+] SSH access successful! Connect with:\033[0m"
-            echo "ssh -o StrictHostKeyChecking=no $user@$IP"
-            echo ""
-            echo "# Or with password in command (less secure):"
-            echo "sshpass -p '$pass' ssh -o StrictHostKeyChecking=no $user@$IP"
-            echo ""
-            echo "# Copy files from remote:"
-            echo "scp -o StrictHostKeyChecking=no $user@$IP:/path/to/file ."
-            echo ""
-            echo "# Copy files to remote:"
-            echo "scp -o StrictHostKeyChecking=no localfile $user@$IP:/path/to/destination"
-            echo ""
+        if check_port $IP 22 "SSH"; then
+            ssh_output=$(unbuffer nxc ssh $IP -u "$user" -p "$pass" | tee nxc-enum/smb/ssh-credentials.txt)
+            echo "$ssh_output"
+            
+            # Check if SSH access was successful and suggest connection
+            if echo "$ssh_output" | grep -q "\[+\].*Shell access"; then
+                echo -e "\n\033[92m[+] SSH access successful! Connect with:\033[0m"
+                echo "ssh -o StrictHostKeyChecking=no $user@$IP"
+                echo ""
+                echo "# Or with password in command (less secure):"
+                echo "sshpass -p '$pass' ssh -o StrictHostKeyChecking=no $user@$IP"
+                echo ""
+                echo "# Copy files from remote:"
+                echo "scp -o StrictHostKeyChecking=no $user@$IP:/path/to/file ."
+                echo ""
+                echo "# Copy files to remote:"
+                echo "scp -o StrictHostKeyChecking=no localfile $user@$IP:/path/to/destination"
+                echo ""
+            fi
         fi
     else
         echo -e "\033[93m[!] Skipping SSH check (SSH requires password, not hash)\033[0m"
@@ -1231,7 +1288,9 @@ if [ -n "$user" ]; then
 
     echo -e "\n\033[91m[+] SSH Command Execution (whoami)\033[0m\n"
     if [ -n "$pass" ]; then
-        unbuffer nxc ssh $IP -u "$user" -p "$pass" -x "whoami" | tee nxc-enum/smb/ssh-whoami.txt
+        if check_port $IP 22; then
+            unbuffer nxc ssh $IP -u "$user" -p "$pass" -x "whoami" | tee nxc-enum/smb/ssh-whoami.txt
+        fi
     else
         echo -e "\033[93m[!] Skipping (SSH requires password)\033[0m"
     fi
@@ -1241,19 +1300,44 @@ if [ -n "$user" ]; then
     echo -e "\n\033[91m[+] FTP Credentials Check\033[0m\n"
     # FTP doesn't support hash authentication
     if [ -n "$pass" ]; then
-        timeout 5s unbuffer nxc ftp $IP -u "$user" -p "$pass" | tee nxc-enum/smb/ftp-credentials.txt
+        if check_port $IP 21 "FTP"; then
+            timeout 5s unbuffer nxc ftp $IP -u "$user" -p "$pass" | tee nxc-enum/smb/ftp-credentials.txt
+            
+            # Suggest manual FTP/NC connection
+            echo -e "\n\033[96m[+] Manual FTP connection:\033[0m"
+            echo "ftp ftp://$user:$pass@$IP"
+            echo "nc -nv $IP 21"
+            echo ""
+        fi
     else
         echo -e "\033[93m[!] Skipping FTP check (FTP requires password, not hash)\033[0m"
     fi
     
     echo -e "\n\033[91m[+] FTP Share Enumeration\033[0m\n"
     if [ -n "$pass" ]; then
-        timeout 5s unbuffer nxc ftp $IP -u "$user" -p "$pass" --ls | tee nxc-enum/smb/ftp-shares.txt
+        if check_port $IP 21; then
+            timeout 5s unbuffer nxc ftp $IP -u "$user" -p "$pass" --ls | tee nxc-enum/smb/ftp-shares.txt
+        fi
     else
         echo -e "\033[93m[!] Skipping (FTP requires password)\033[0m"
     fi
 else
     echo -e "\n\033[93m[!] Skipping SSH/FTP Enumeration (no username supplied)\033[0m"
+fi
+
+# Telnet Enumeration (using available tool checking)
+echo -e "\n\033[96m[+] Telnet Enumeration (Port 23):\033[0m"
+if check_port $IP 23; then
+    echo -e "\033[92m[+] Telnet port 23 is OPEN!\033[0m"
+    echo -e "\033[96m[+] Suggested connection commands:\033[0m"
+    echo "telnet -l $user $IP"
+    echo "nc -nv $IP 23"
+    echo ""
+    echo "# Banner grab:"
+    timeout 2 nc -nv $IP 23 2>/dev/null
+    echo ""
+else
+    echo -e "\033[93m[!] Telnet (23) is closed\033[0m"
 fi
 
 # Advanced DACL enumeration (requires credentials)
