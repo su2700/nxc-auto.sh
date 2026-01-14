@@ -949,6 +949,13 @@ if [ "$os_type" = "windows" ]; then
                     echo "rdesktop -u $user -p '$pass' $IP"
                 fi
                 echo ""
+                echo "# Or with Remmina (URI):"
+                if [ -n "$domain" ]; then
+                    echo "remmina://rdp://$domain\\\\$user:$pass@$IP"
+                else
+                    echo "remmina://rdp://$user:$pass@$IP"
+                fi
+                echo ""
             fi
         else
             echo -e "\n\033[93m[!] Skipping RDP check (Port 3389 closed)\033[0m"
