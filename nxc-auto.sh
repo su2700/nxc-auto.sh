@@ -1187,6 +1187,36 @@ if [ "$os_type" = "windows" ]; then
         unbuffer nxc ldap $IP $USER_FLAG --users --trusted-for-delegation 2>/dev/null | tee nxc-enum/ldap/trusted-for-delegation.txt
     
         echo -e "\n\033[91m[+] Kerberoasting\033[0m\n"
+        echo -e "\n\033[91m[+] AD CS Enumeration (Certipy)\033[0m\n"
+        if command -v certipy &> /dev/null; then
+             echo "[*] Running Certipy find..."
+             # Extract domain name if variable is set, otherwise rely on Certipy finding it
+             certipy_domain_flag=""
+             if [ -n "$domain" ]; then
+                 certipy_domain_flag="-target $domain"
+             else
+                 # Certipy usually wants a domain/target. We can try IP
+                 certipy_domain_flag="-target $IP"
+             fi
+             
+             # Run certipy find
+             unbuffer certipy find $certipy_domain_flag -u "$user" -p "$pass" -dc-ip $IP -vulnerable -output nxc-enum/ldap/certipy_ 2>/dev/null
+             
+             if ls nxc-enum/ldap/certipy_*.txt 1> /dev/null 2>&1; then
+                 echo -e "\033[92m[+] Certipy scan complete! Results saved to nxc-enum/ldap/\033[0m"
+                 echo "[*] Checking for vulnerable templates..."
+                 grep -iE "ESC[0-9]" nxc-enum/ldap/certipy_*.txt || echo "[-] No obvious ESC vulnerabilities found in text output."
+                 echo ""
+                 echo "# View full report:"
+                 echo "cat nxc-enum/ldap/certipy_*.txt"
+             else
+                 echo "[-] Certipy run failed or no output generated."
+             fi
+        else
+             echo -e "\033[93m[!] Certipy not found. Skipping AD CS check.\033[0m"
+             echo "# Install with: pipx install certipy-ad"
+        fi
+
         rm -f nxc-enum/ldap/kerberoasting.txt kerberoasting.txt 2>/dev/null
         unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt 2>/dev/null
         if [ -s nxc-enum/ldap/kerberoasting.txt ] && grep -q 'krb5tgs' nxc-enum/ldap/kerberoasting.txt 2>/dev/null; then
