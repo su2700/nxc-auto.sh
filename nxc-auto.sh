@@ -1190,25 +1190,24 @@ if [ "$os_type" = "windows" ]; then
         echo -e "\n\033[91m[+] AD CS Enumeration (Certipy)\033[0m\n"
         if command -v certipy &> /dev/null; then
              echo "[*] Running Certipy find..."
-             # Extract domain name if variable is set, otherwise rely on Certipy finding it
-             certipy_domain_flag=""
+             # Construct Certipy command with user@domain if available (more reliable)
+             certipy_cmd="certipy find"
              if [ -n "$domain" ]; then
-                 certipy_domain_flag="-target $domain"
+                 certipy_cmd="$certipy_cmd -u '$user@$domain' -p '$pass' -target '$domain'"
              else
-                 # Certipy usually wants a domain/target. We can try IP
-                 certipy_domain_flag="-target $IP"
+                 certipy_cmd="$certipy_cmd -u '$user' -p '$pass' -target '$IP'"
              fi
              
              # Run certipy find
-             unbuffer certipy find $certipy_domain_flag -u "$user" -p "$pass" -dc-ip $IP -vulnerable -output nxc-enum/ldap/certipy_ 2>/dev/null
+             eval "$certipy_cmd -dc-ip $IP -vulnerable -stdout 2>/dev/null" | tee nxc-enum/ldap/certipy_output.txt
              
-             if ls nxc-enum/ldap/certipy_*.txt 1> /dev/null 2>&1; then
-                 echo -e "\033[92m[+] Certipy scan complete! Results saved to nxc-enum/ldap/\033[0m"
+             if [ -s nxc-enum/ldap/certipy_output.txt ]; then
+                 echo -e "\033[92m[+] Certipy scan complete! Results saved to nxc-enum/ldap/certipy_output.txt\033[0m"
                  echo "[*] Checking for vulnerable templates..."
-                 grep -iE "ESC[0-9]" nxc-enum/ldap/certipy_*.txt || echo "[-] No obvious ESC vulnerabilities found in text output."
+                 grep -iE "ESC[0-9]" nxc-enum/ldap/certipy_output.txt || echo "[-] No obvious ESC vulnerabilities found in text output."
                  echo ""
                  echo "# View full report:"
-                 echo "cat nxc-enum/ldap/certipy_*.txt"
+                 echo "cat nxc-enum/ldap/certipy_output.txt"
              else
                  echo "[-] Certipy run failed or no output generated."
              fi
