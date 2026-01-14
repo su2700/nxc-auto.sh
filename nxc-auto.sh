@@ -643,6 +643,61 @@ if [ "$os_type" = "windows" ]; then
         fi
         echo ""
     fi
+    
+    echo -e "\n\033[96m[+] Checking LDAP Guest access\033[0m"
+    # Try with guest account
+    if [ -n "$domain" ]; then
+        ldap_guest_output=$(timeout 5s nxc ldap $IP -d "$domain" -u 'guest' -p '' --timeout 2)
+    else
+        ldap_guest_output=$(timeout 5s nxc ldap $IP -u 'guest' -p '' --timeout 2)
+    fi
+    echo "$ldap_guest_output"
+
+    if echo "$ldap_guest_output" | grep -q "\[+\]"; then
+        echo -e "\n\033[92m[+] Guest LDAP access successful! Attempting to dump data...\033[0m"
+        
+        # Determine Base DN (Similar logic to anonymous)
+        if [ -n "$domain" ]; then
+            base_dn=$(echo "$domain" | sed 's/\./,DC=/g' | sed 's/^/DC=/')
+        else
+            echo "[-] Domain not specified, attempting to fetch defaultNamingContext..."
+            # Try to fetch defaultNamingContext via guest
+            # Note: ldapsearch needs bind DN for guest: -D "guest" -w "" usually works if guest is enabled
+            base_dn=$(ldapsearch -x -H ldap://$IP -D "guest" -w "" -s base namingContexts 2>/dev/null | grep "defaultNamingContext:" | awk '{print $2}')
+            
+            if [ -z "$base_dn" ]; then
+                 base_dn=$(ldapsearch -x -H ldap://$IP -D "guest" -w "" -s base namingContexts 2>/dev/null | grep "namingContexts:" | awk '{print $2}' | grep "^DC=" | head -n 1)
+            fi
+        fi
+
+        if [ -n "$base_dn" ]; then
+            echo "[+] Using Base DN: $base_dn"
+            echo "[*] Dumping all objects (as Guest)..."
+            # Bind as guest
+            ldapsearch -x -H ldap://$IP -D "guest" -w "" -b "$base_dn" -s sub "(objectClass=*)" > nxc-enum/ldap/ldap-dump-guest.txt
+            
+            if [ -s nxc-enum/ldap/ldap-dump-guest.txt ]; then
+                echo -e "\033[92m[+] Full LDAP dump saved to: nxc-enum/ldap/ldap-dump-guest.txt\033[0m"
+                
+                # Extract users
+                grep "sAMAccountName" nxc-enum/ldap/ldap-dump-guest.txt | awk '{print $2}' | sort | uniq > nxc-enum/ldap/ldap-users-guest.txt
+                echo "[+] Extracted $(wc -l < nxc-enum/ldap/ldap-users-guest.txt) users to: nxc-enum/ldap/ldap-users-guest.txt"
+                
+                # Check for sensitive info
+                echo "[*] Searching for sensitive info in descriptions..."
+                grep -iE "description|info|comment" nxc-enum/ldap/ldap-dump-guest.txt | grep -iE "pass|pwd|secret|admin|welcome" > nxc-enum/ldap/ldap-sensitive-descriptions-guest.txt
+                if [ -s nxc-enum/ldap/ldap-sensitive-descriptions-guest.txt ]; then
+                    echo -e "\033[93m[!] FOUND POTENTIAL SECRETS in LDAP descriptions (Guest)!\033[0m"
+                    cat nxc-enum/ldap/ldap-sensitive-descriptions-guest.txt
+                fi
+            else
+                echo -e "\033[91m[!] LDAP dump file is empty. Guest bind allowed but maybe no read access?\033[0m"
+            fi
+        else
+            echo -e "\033[93m[!] Could not determine Base DN automatically via Guest.\033[0m"
+        fi
+        echo ""
+    fi
 fi
 
 echo -e "\n\033[96m[+] NFS Enumeration (No credentials required)\033[0m"
