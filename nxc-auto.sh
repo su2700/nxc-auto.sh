@@ -1004,11 +1004,11 @@ if [ "$os_type" = "windows" ]; then
                     echo "rdesktop -u $user -p '$pass' $IP"
                 fi
                 echo ""
-                echo "# Or with Remmina (URI):"
+                echo "# Or with Remmina (command line):"
                 if [ -n "$domain" ]; then
-                    echo "remmina://rdp://$domain\\\\$user:$pass@$IP"
+                    echo "remmina -c 'rdp://$domain\\\\$user:$pass@$IP'"
                 else
-                    echo "remmina://rdp://$user:$pass@$IP"
+                    echo "remmina -c 'rdp://$user:$pass@$IP'"
                 fi
                 echo ""
             fi
