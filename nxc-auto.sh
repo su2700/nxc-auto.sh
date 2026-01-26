@@ -760,22 +760,63 @@ if [ "$os_type" = "windows" ]; then
 fi
 
 echo -e "\n\033[96m[+] NFS Enumeration (No credentials required)\033[0m"
+
+# 1. NetExec NFS enumeration
 print_cmd "nxc nfs $IP --shares"
-nfs_output=$(unbuffer nxc nfs $IP --shares | tee nxc-enum/smb/nfs-shares.txt)
+nfs_output=$(unbuffer nxc nfs $IP --shares 2>/dev/null | tee nxc-enum/smb/nfs-shares.txt)
 echo "$nfs_output"
 
-# Check for NFS shares and suggest mount commands
-if echo "$nfs_output" | grep -qE "r--|rw-|rwx"; then
+# 2. showmount enumeration
+if command -v showmount &> /dev/null; then
+    echo -e "\n\033[96m[+] showmount -e $IP\033[0m"
+    print_cmd "showmount -e $IP"
+    showmount_output=$(showmount -e $IP 2>/dev/null | tee nxc-enum/smb/nfs-showmount.txt)
+    echo "$showmount_output"
+else
+    showmount_output=""
+fi
+
+# 3. rpcinfo (Bonus: reveals if NFS/mountd are running)
+if command -v rpcinfo &> /dev/null; then
+    echo -e "\n\033[96m[+] rpcinfo -p $IP\033[0m"
+    print_cmd "rpcinfo -p $IP"
+    rpcinfo -p $IP 2>/dev/null | tee nxc-enum/smb/nfs-rpcinfo.txt
+fi
+
+# Check for NFS shares and suggest mount commands from both tools
+if echo "$nfs_output" | grep -qE "r--|rw-|rwx" || echo "$showmount_output" | grep -q "^/"; then
     echo -e "\n\033[92m[+] NFS shares found! Suggested mount commands:\033[0m"
-    echo "$nfs_output" | grep -E "r--|rw-|rwx" | while read -r line; do
-        clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
-        # Extract the share path (starts with /)
-        nfs_share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^\//) {print $i; exit}}'| head -n1)
-        if [ ! -z "$nfs_share" ]; then
-            echo "sudo mount -t nfs $IP:$nfs_share /mnt/nfs"
-            echo "# Or with specific version: sudo mount -t nfs -o vers=3 $IP:$nfs_share /mnt/nfs"
-        fi
-    done
+    echo "sudo mkdir -p /mnt/nfs"
+    
+    # Track shares we already suggested to avoid duplicates
+    suggested_shares=""
+    
+    # Process nxc output
+    if echo "$nfs_output" | grep -qE "r--|rw-|rwx"; then
+        while read -r line; do
+            clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+            nfs_share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^\//) {print $i; exit}}'| head -n1)
+            if [ -n "$nfs_share" ]; then
+                echo "# Mount $nfs_share:"
+                echo "sudo mount -t nfs $IP:$nfs_share /mnt/nfs"
+                echo "# Or with specific version: sudo mount -t nfs -o vers=3 $IP:$nfs_share /mnt/nfs"
+                suggested_shares="$suggested_shares $nfs_share"
+            fi
+        done < <(echo "$nfs_output" | grep -E "r--|rw-|rwx")
+    fi
+    
+    # Process showmount output (for extra shares or if nxc failed)
+    if [ -n "$showmount_output" ]; then
+        while read -r line; do
+            nfs_share=$(echo "$line" | awk '{print $1}')
+            if [ -n "$nfs_share" ] && [[ "$nfs_share" == /* ]] && ! echo "$suggested_shares" | grep -q "$nfs_share"; then
+                echo "# Mount $nfs_share:"
+                echo "sudo mount -t nfs $IP:$nfs_share /mnt/nfs"
+                echo "# Or with specific version: sudo mount -t nfs -o vers=3 $IP:$nfs_share /mnt/nfs"
+                suggested_shares="$suggested_shares $nfs_share"
+            fi
+        done < <(echo "$showmount_output" | grep "^/")
+    fi
     echo ""
 fi
 
