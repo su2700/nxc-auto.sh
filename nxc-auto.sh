@@ -136,6 +136,84 @@ fi
 
 mkdir -p nxc-enum nxc-enum/smb nxc-enum/ldap
 
+# Check for nxc database schema issues and auto-fix
+check_nxc_db() {
+    if command -v nxc &> /dev/null; then
+        # Run a quick check against localhost to trigger potential DB errors
+        check_out=$(nxc smb 127.0.0.1 --timeout 1 2>&1)
+        if echo "$check_out" | grep -q "Schema mismatch detected"; then
+             echo -e "\033[93m[!] NXC DB Schema mismatch detected during self-check. Auto-fixing...\033[0m"
+             # Try deleting DBs for both current user and root (if running as root)
+             rm -f ~/.nxc/workspaces/default/*.db 2>/dev/null
+             rm -f /root/.nxc/workspaces/default/*.db 2>/dev/null
+             echo -e "\033[92m[+] Database files removed. NetExec will re-initialize them on the next run.\033[0m"
+        fi
+    fi
+}
+check_nxc_db
+VALID_CREDS_FILE="nxc-enum/valid_credentials.txt"
+> "$VALID_CREDS_FILE"
+POTENTIAL_CREDS_FILE="nxc-enum/potential_credentials.txt"
+> "$POTENTIAL_CREDS_FILE"
+
+# Function to promote a working credential to the primary user
+promote_verified_creds() {
+    if [ -s "$VALID_CREDS_FILE" ] && { [ -f "$user" ] || [ -z "$user" ] || [ "$HAS_PROMOTED" != "true" ]; }; then
+        # Pick the first one (usually the one nxc found first)
+        local best_cred=$(head -n 1 "$VALID_CREDS_FILE")
+        local disc_domain=""
+        local remainder=""
+        local disc_user=""
+        local disc_secret=""
+        
+        if [[ "$best_cred" == *"\\"* ]]; then
+            disc_domain=$(echo "$best_cred" | cut -d'\' -f1)
+            remainder=$(echo "$best_cred" | cut -d'\' -f2-)
+        else
+            remainder="$best_cred"
+        fi
+        
+        disc_user=$(echo "$remainder" | cut -d: -f1)
+        disc_secret=$(echo "$remainder" | cut -d: -f2-)
+        
+        # Don't promote if it's the same as what we already have (unless we had a file)
+        [ "$user" == "$disc_user" ] && [ ! -f "$user" ] && return
+        
+        echo -e "\n\033[92m[+] Found valid credentials: $best_cred\033[0m"
+        echo -e "\033[96m[*] Promoting '$disc_user' as primary user for deep-dive enumeration...\033[0m"
+        
+        # Update globals
+        [ -n "$disc_domain" ] && domain="$disc_domain"
+        user="$disc_user"
+        
+        # Determine if hash or password
+        if [[ "$disc_secret" =~ ^[0-9a-fA-F]{32}$ ]] || [[ "$disc_secret" =~ ^[0-9a-fA-F]{32}:[0-9a-fA-F]{32}$ ]]; then
+            hash="$disc_secret"
+            pass=""
+        else
+            pass="$disc_secret"
+            hash=""
+        fi
+        
+        # Re-build flags
+        if [ -n "$domain" ]; then DOMAIN_FLAG="-d $domain"; else DOMAIN_FLAG=""; fi
+        if [ -n "$hash" ]; then
+            USER_FLAG="-u $user -H $hash"
+            RPC_ARG="-U $domain\\\\$user --pw-nt-hash $hash"
+            SECRETS_ARG="-hashes :$hash $domain/$user@$IP"
+            RPCDUMP_ARG="-u $user -hashes :$hash -d $domain"
+        elif [ -n "$pass" ]; then
+            USER_FLAG="-u $user -p $pass"
+            RPC_ARG="-U $domain\\\\$user%$pass"
+            SECRETS_ARG="$domain/$user:$pass@$IP"
+            RPCDUMP_ARG="-u $user -p $pass -d $domain"
+        fi
+        
+        HAS_PROMOTED="true"
+        echo -e "\033[96m[*] Flags updated. Subsequent checks will use '$user' credentials.\033[0m\n"
+    fi
+}
+
 # Show Impacket tools suggestions if credentials provided
 if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
     echo -e "\n\033[96m[+] Impacket Tools - Quick Reference:\033[0m"
@@ -835,6 +913,39 @@ check_and_suggest() {
 
     echo "$output"
     
+    # Auto-fix Schema Mismatch and Retry
+    if echo "$output" | grep -q "Schema mismatch detected"; then
+        echo -e "\n\033[93m[!] Schema mismatch detected! Attempting auto-fix (deleting old DBs) and RETRYING...\033[0m"
+        rm -f ~/.nxc/workspaces/default/*.db 2>/dev/null
+        rm -f /root/.nxc/workspaces/default/*.db 2>/dev/null
+        
+        echo -e "\033[96m[*] Retrying command...\033[0m"
+        # Retry the command
+        print_cmd "$@"
+        output=$("$@")
+        echo "$output"
+    fi
+    
+    # Harvest any successes found in this tool's output
+    echo "$output" | grep -a "\[+\]" | sed 's/\x1b\[[0-9;]*m//g' | while read -r line; do
+        local cred=$(echo "$line" | sed 's/.*\[+\] //')
+        if [ -n "$cred" ]; then
+            if ! grep -qxF "$cred" "$VALID_CREDS_FILE" 2>/dev/null; then
+                echo "$cred" >> "$VALID_CREDS_FILE"
+            fi
+        fi
+    done
+
+    # Harvest password change required
+    echo "$output" | grep -a "STATUS_PASSWORD_MUST_CHANGE\|STATUS_PASSWORD_EXPIRED" | sed 's/\x1b\[[0-9;]*m//g' | while read -r line; do
+        local cred=$(echo "$line" | sed 's/.*[-] //' | cut -d' ' -f1)
+        if [ -n "$cred" ]; then
+            if ! grep -qxF "$cred" "$POTENTIAL_CREDS_FILE" 2>/dev/null; then
+                echo "$cred (PASSWORD_MUST_CHANGE)" >> "$POTENTIAL_CREDS_FILE"
+            fi
+        fi
+    done
+    
     # Check for success indicator "[+]"
     if echo "$output" | grep -q "+"; then
         echo -e "\033[92m[+] Valid credentials for $service! Suggested command:\033[0m"
@@ -1044,8 +1155,9 @@ if [ "$os_type" = "windows" ]; then
     # SMB (anonymous allowed, domain optional)
     # Added --shares to check shares in one go
     if check_port $IP 445; then
-        smb_output=$(check_and_suggest smb nxc smb $IP $DOMAIN_FLAG $USER_FLAG --shares --timeout 2)
+        smb_output=$(check_and_suggest smb nxc smb $IP $DOMAIN_FLAG $USER_FLAG --shares --continue-on-success --timeout 2)
         echo "$smb_output"
+        promote_verified_creds
     else
         smb_output="" # Empty output if closed
     fi
@@ -1100,7 +1212,8 @@ if [ "$os_type" = "windows" ]; then
     
     # LDAP requires username (domain optional)
     if [ -n "$user" ]; then
-        check_and_suggest ldap nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --timeout 2
+        check_and_suggest ldap nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --continue-on-success --timeout 2
+        promote_verified_creds
     else
         echo -e "\n\033[93m[!] Skipping LDAP check (no username supplied)\033[0m"
     fi
@@ -1110,8 +1223,9 @@ if [ "$os_type" = "windows" ]; then
         if check_port $IP 3389; then
             echo -e "\n\033[96m[+] RDP Enumeration:\033[0m"
             echo -e "\n\033[91m[+] RDP Credentials Check\033[0m\n"
-            rdp_output=$(check_and_suggest rdp nxc rdp $IP $DOMAIN_FLAG $USER_FLAG)
+            rdp_output=$(check_and_suggest rdp nxc rdp $IP $DOMAIN_FLAG $USER_FLAG --continue-on-success)
             echo "$rdp_output"
+            promote_verified_creds
             
             # Check if RDP access was successful
             if echo "$rdp_output" | grep -q "\[+\]"; then
@@ -1229,7 +1343,7 @@ if [ "$os_type" = "windows" ]; then
         if check_port $IP 5985 || check_port $IP 5986; then
             echo -e "\n\033[96m[+] WinRM Enumeration:\033[0m"
             echo -e "\n\033[91m[+] WinRM Credentials Check\033[0m\n"
-            check_and_suggest winrm nxc winrm $IP $DOMAIN_FLAG $USER_FLAG | tee nxc-enum/smb/winrm-credentials.txt
+            check_and_suggest winrm nxc winrm $IP $DOMAIN_FLAG $USER_FLAG --continue-on-success | tee nxc-enum/smb/winrm-credentials.txt
         
             echo -e "\n\033[91m[+] WinRM Command Execution (whoami)\033[0m\n"
             print_cmd "nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami"
