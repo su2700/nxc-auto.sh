@@ -1566,6 +1566,22 @@ if [ "$os_type" = "windows" ]; then
         echo -e "\n\033[91m[+] Spider Plus (Find Interesting Files)\033[0m\n"
         print_cmd "nxc smb $IP $USER_FLAG -M spider_plus --timeout 10"
         timeout 60s unbuffer nxc smb $IP $USER_FLAG -M spider_plus --timeout 10 | tee nxc-enum/smb/spider-plus.txt
+        
+        # Copy spider_plus JSON findings to workspace
+        if [ -d "$HOME/.nxc/modules/nxc_spider_plus" ]; then
+             cp -r "$HOME/.nxc/modules/nxc_spider_plus" nxc-enum/smb/ 2>/dev/null
+        fi
+        # Also check root path just in case
+        if [ -d "/root/.nxc/modules/nxc_spider_plus" ] && [ "$(id -u)" -eq 0 ]; then
+             cp -r "/root/.nxc/modules/nxc_spider_plus" nxc-enum/smb/ 2>/dev/null
+        else
+             # Try sudo copy if we can't read it
+             sudo cp -r "/root/.nxc/modules/nxc_spider_plus" nxc-enum/smb/ 2>/dev/null
+        fi
+        
+        if [ -d "nxc-enum/smb/nxc_spider_plus" ]; then
+            echo -e "\033[92m[+] Spider Plus JSON results copied to: nxc-enum/smb/nxc_spider_plus/\033[0m"
+        fi
     
         echo -e "\n\033[91m[+] Check Zerologon Vulnerability\033[0m\n"
         print_cmd "nxc smb $IP $USER_FLAG -M zerologon --timeout 5"
