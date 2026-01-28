@@ -630,6 +630,25 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
         users_file=$(ls -t nxc-enum/smb/users_*.txt 2>/dev/null | head -n1)
     fi
     
+    # Auto-adopt discovered users if no user argument was provided
+    if [ -z "$user" ] && [ -n "$users_file" ] && [ -s "$users_file" ]; then
+        echo -e "\n\033[92m[+] Auto-adopting discovered username list for further checks...\033[0m"
+        # Convert to absolute path to avoid any cd issues
+        user=$(readlink -f "$users_file")
+        
+        # Re-build flags with the new user list
+        if [ -n "$domain" ]; then DOMAIN_FLAG="-d $domain"; else DOMAIN_FLAG=""; fi
+        
+        # If password was provided, utilize it (Spray), otherwise default to empty (Blank Spray)
+        if [ -n "$pass" ]; then
+             USER_FLAG="-u $user -p $pass"
+        else
+             USER_FLAG="-u $user -p ''"
+        fi
+        echo -e "\033[96m[*] User flag updated to: $USER_FLAG\033[0m"
+        echo -e "\033[93m[*] Note: This will attempt authentication with the extracted user list.\033[0m"
+    fi
+    
     # Continue with AS-REP roasting if we have a users file
     if [ -n "$users_file" ] && [ -s "$users_file" ]; then
         
