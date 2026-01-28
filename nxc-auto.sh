@@ -1544,8 +1544,8 @@ if [ "$os_type" = "windows" ]; then
              fi
              
              # Run certipy find
-             print_cmd "$certipy_run_cmd -dc-ip $IP -vulnerable -stdout"
-             eval "$certipy_run_cmd -dc-ip $IP -vulnerable -stdout 2>/dev/null" | tee nxc-enum/ldap/certipy_output.txt
+             print_cmd "$certipy_run_cmd -dc-ip $IP -vulnerable -enabled -stdout"
+             eval "$certipy_run_cmd -dc-ip $IP -vulnerable -enabled -stdout 2>/dev/null" | tee nxc-enum/ldap/certipy_output.txt
              
              if [ -s nxc-enum/ldap/certipy_output.txt ]; then
                  echo -e "\033[92m[+] Certipy scan complete! Results saved to nxc-enum/ldap/certipy_output.txt\033[0m"
