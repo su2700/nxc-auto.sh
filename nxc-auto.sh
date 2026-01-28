@@ -695,6 +695,8 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
             if ! command -v kerbrute &> /dev/null; then
                  if [ -f "$HOME/.local/bin/kerbrute" ]; then
                      KERBRUTE_CMD="$HOME/.local/bin/kerbrute"
+                 elif [ -f "/home/noah/.local/bin/kerbrute" ]; then
+                     KERBRUTE_CMD="/home/noah/.local/bin/kerbrute"
                  elif [ -f "/usr/local/bin/kerbrute" ]; then
                      KERBRUTE_CMD="/usr/local/bin/kerbrute"
                  fi
