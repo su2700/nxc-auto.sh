@@ -690,12 +690,22 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
             echo -e "\n\033[96m[+] Additional User Attacks (Kerbrute, GetTGT, NetView)\033[0m"
             
             # 1. Kerbrute User Enumeration (Validation)
-            if command -v kerbrute &> /dev/null; then
+            # Check if kerbrute is in PATH, if not check distinct location
+            KERBRUTE_CMD="kerbrute"
+            if ! command -v kerbrute &> /dev/null; then
+                 if [ -f "$HOME/.local/bin/kerbrute" ]; then
+                     KERBRUTE_CMD="$HOME/.local/bin/kerbrute"
+                 elif [ -f "/usr/local/bin/kerbrute" ]; then
+                     KERBRUTE_CMD="/usr/local/bin/kerbrute"
+                 fi
+            fi
+
+            if command -v "$KERBRUTE_CMD" &> /dev/null || [ -f "$KERBRUTE_CMD" ]; then
                  echo -e "\n\033[91m[+] Kerbrute User Validation\033[0m"
-                 print_cmd "kerbrute userenum -d \"$domain_name\" --dc $IP \"$users_file\""
-                 timeout 60s kerbrute userenum -d "$domain_name" --dc $IP "$users_file" 2>/dev/null | tee nxc-enum/smb/kerbrute-validation.txt
+                 print_cmd "$KERBRUTE_CMD userenum -d \"$domain_name\" --dc $IP \"$users_file\""
+                 timeout 60s "$KERBRUTE_CMD" userenum -d "$domain_name" --dc $IP "$users_file" 2>/dev/null | tee nxc-enum/smb/kerbrute-validation.txt
             else
-                 echo -e "\n\033[93m[!] kerbrute not found. Skipping user validation.\033[0m"
+                 echo -e "\n\033[93m[!] kerbrute not found (checked PATH and ~/.local/bin). Skipping user validation.\033[0m"
             fi
             
             # 2. NetView Enumeration (Network/Session info)
