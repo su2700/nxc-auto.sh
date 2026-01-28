@@ -1507,6 +1507,8 @@ if [ "$os_type" = "windows" ]; then
         if ! command -v certipy &> /dev/null; then
              if [ -f "$HOME/.local/bin/certipy" ]; then
                  CERTIPY_CMD="$HOME/.local/bin/certipy"
+             elif [ -f "/home/noah/.local/bin/certipy" ]; then
+                 CERTIPY_CMD="/home/noah/.local/bin/certipy"
              elif [ -f "/usr/local/bin/certipy" ]; then
                  CERTIPY_CMD="/usr/local/bin/certipy"
              fi
