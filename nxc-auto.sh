@@ -685,6 +685,41 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
                 echo "# Show cracked passwords:"
                 echo "john --show nxc-enum/smb/asrep-hashes.txt"
             fi
+            
+            # --- New Checks (Kerbrute, GetTGT, NetView) ---
+            echo -e "\n\033[96m[+] Additional User Attacks (Kerbrute, GetTGT, NetView)\033[0m"
+            
+            # 1. Kerbrute User Enumeration (Validation)
+            if command -v kerbrute &> /dev/null; then
+                 echo -e "\n\033[91m[+] Kerbrute User Validation\033[0m"
+                 print_cmd "kerbrute userenum -d \"$domain_name\" --dc $IP \"$users_file\""
+                 timeout 60s kerbrute userenum -d "$domain_name" --dc $IP "$users_file" 2>/dev/null | tee nxc-enum/smb/kerbrute-validation.txt
+            else
+                 echo -e "\n\033[93m[!] kerbrute not found. Skipping user validation.\033[0m"
+            fi
+            
+            # 2. NetView Enumeration (Network/Session info)
+            echo -e "\n\033[91m[+] NetView Network Enumeration\033[0m"
+            # NetView usually needs a valid user/pass, checking if we have one, otherwise runs limited
+            if [ -n "$user" ] && [ -n "$pass" ]; then
+                 print_cmd "impacket-netview \"$domain_name\"/\"$user\":\"$pass\"@$IP"
+                 impacket-netview "$domain_name"/"$user":"$pass"@$IP 2>/dev/null | tee nxc-enum/smb/netview-auth.txt
+            else
+                 # Try with empty/anonymous if no creds yet (likely fails but worth a shot if Null session allowed)
+                 print_cmd "impacket-netview \"$domain_name\"/''@$IP -no-pass"
+                 impacket-netview "$domain_name"/''@$IP -no-pass 2>/dev/null | tee nxc-enum/smb/netview-anon.txt
+            fi
+
+            # 3. GetTGT (Check for TGT acquisition)
+            echo -e "\n\033[91m[+] GetTGT Check\033[0m"
+            # Iterate through the user list to check if any have 'no-auth' or simple default pwd patterns (logic limited here without pwd list)
+            # But we can try the AS-REP roastable ones or just notify the user
+            echo "[*] TGT acquisition requires a valid password/hash."
+            echo "[*] If you crack an AS-REP hash, get a TGT with:"
+            echo "    impacket-getTGT $domain_name/<user>:<password>"
+            echo ""
+            # --- End New Checks ---
+            
         else
             echo "# Could not auto-detect domain name"
             echo "# Run manually with: GetNPUsers.py DOMAIN/ -usersfile $users_file -no-pass -dc-ip $IP"
