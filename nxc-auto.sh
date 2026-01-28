@@ -786,7 +786,7 @@ if [ "$os_type" = "windows" ]; then
             echo "[+] Using Base DN: $base_dn"
             echo "[*] Dumping all objects..."
             print_cmd "ldapsearch -x -H ldap://$IP -b \"$base_dn\" -s sub \"(objectClass=*)\""
-            ldapsearch -x -H ldap://$IP -b "$base_dn" -s sub "(objectClass=*)" | tee nxc-enum/ldap/ldap-dump-anonymous.txt
+            ldapsearch -x -H ldap://$IP -b "$base_dn" -s sub "(objectClass=*)" > nxc-enum/ldap/ldap-dump-anonymous.txt
             
             if [ -s nxc-enum/ldap/ldap-dump-anonymous.txt ]; then
                 echo -e "\033[92m[+] Full LDAP dump saved to: nxc-enum/ldap/ldap-dump-anonymous.txt\033[0m"
@@ -846,7 +846,7 @@ if [ "$os_type" = "windows" ]; then
             echo "[*] Dumping all objects (as Guest)..."
             # Bind as guest
             print_cmd "ldapsearch -x -H ldap://$IP -D \"guest\" -w \"\" -b \"$base_dn\" -s sub \"(objectClass=*)\""
-            ldapsearch -x -H ldap://$IP -D "guest" -w "" -b "$base_dn" -s sub "(objectClass=*)" | tee nxc-enum/ldap/ldap-dump-guest.txt
+            ldapsearch -x -H ldap://$IP -D "guest" -w "" -b "$base_dn" -s sub "(objectClass=*)" > nxc-enum/ldap/ldap-dump-guest.txt
             
             if [ -s nxc-enum/ldap/ldap-dump-guest.txt ]; then
                 echo -e "\033[92m[+] Full LDAP dump saved to: nxc-enum/ldap/ldap-dump-guest.txt\033[0m"
