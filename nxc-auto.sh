@@ -1500,19 +1500,29 @@ if [ "$os_type" = "windows" ]; then
     
         echo -e "\n\033[91m[+] Kerberoasting\033[0m\n"
         echo -e "\n\033[91m[+] AD CS Enumeration (Certipy)\033[0m\n"
-        if command -v certipy &> /dev/null; then
+        # Check if certipy is in PATH, if not check distinct location
+        CERTIPY_CMD="certipy"
+        if ! command -v certipy &> /dev/null; then
+             if [ -f "$HOME/.local/bin/certipy" ]; then
+                 CERTIPY_CMD="$HOME/.local/bin/certipy"
+             elif [ -f "/usr/local/bin/certipy" ]; then
+                 CERTIPY_CMD="/usr/local/bin/certipy"
+             fi
+        fi
+
+        if command -v "$CERTIPY_CMD" &> /dev/null || [ -f "$CERTIPY_CMD" ]; then
              echo "[*] Running Certipy find..."
              # Construct Certipy command with user@domain if available (more reliable)
-             certipy_cmd="certipy find"
+             certipy_run_cmd="$CERTIPY_CMD find"
              if [ -n "$domain" ]; then
-                 certipy_cmd="$certipy_cmd -u '$user@$domain' -p '$pass' -target '$domain'"
+                 certipy_run_cmd="$certipy_run_cmd -u '$user@$domain' -p '$pass' -target '$domain'"
              else
-                 certipy_cmd="$certipy_cmd -u '$user' -p '$pass' -target '$IP'"
+                 certipy_run_cmd="$certipy_run_cmd -u '$user' -p '$pass' -target '$IP'"
              fi
              
              # Run certipy find
-             print_cmd "$certipy_cmd -dc-ip $IP -vulnerable -stdout"
-             eval "$certipy_cmd -dc-ip $IP -vulnerable -stdout 2>/dev/null" | tee nxc-enum/ldap/certipy_output.txt
+             print_cmd "$certipy_run_cmd -dc-ip $IP -vulnerable -stdout"
+             eval "$certipy_run_cmd -dc-ip $IP -vulnerable -stdout 2>/dev/null" | tee nxc-enum/ldap/certipy_output.txt
              
              if [ -s nxc-enum/ldap/certipy_output.txt ]; then
                  echo -e "\033[92m[+] Certipy scan complete! Results saved to nxc-enum/ldap/certipy_output.txt\033[0m"
@@ -1525,7 +1535,7 @@ if [ "$os_type" = "windows" ]; then
                  echo "[-] Certipy run failed or no output generated."
              fi
         else
-             echo -e "\033[93m[!] Certipy not found. Skipping AD CS check.\033[0m"
+             echo -e "\033[93m[!] Certipy not found (checked PATH and ~/.local/bin). Skipping AD CS check.\033[0m"
              echo "# Install with: pipx install certipy-ad"
         fi
 
