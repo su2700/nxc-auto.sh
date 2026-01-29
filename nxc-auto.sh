@@ -1022,33 +1022,41 @@ check_and_suggest() {
     
     # Check for success indicator "[+]"
     if echo "$output" | grep -q "+"; then
+        # If user is a file (list), sanitizing to just 'USER' for display purposes in suggestions
+        # The true username will be available if auto-promotion runs, but here we just want a clean string
+        display_user="$user"
+        if [ -f "$user" ]; then
+             display_user="USER"
+        fi
+
         echo -e "\033[92m[+] Valid credentials for $service! Suggested command:\033[0m"
+
         
         # Prepare credential strings
         if [ -n "$hash" ]; then
-            IMPACKET_CREDS="$domain/$user@$IP -hashes :$hash"
-            WINRM_CREDS="-i $IP -u '$user' -H '$hash'"
+            IMPACKET_CREDS="$domain/$display_user@$IP -hashes :$hash"
+            WINRM_CREDS="-i $IP -u '$display_user' -H '$hash'"
             if [ -n "$domain" ]; then
-                SMBCLIENT_AUTH="-U '$domain\\$user' --pw-nt-hash $hash"
-                SMBGET_USER="$domain/$user%$hash"
-                SMBMAP_CREDS="-u '$user' -p '$hash' -d '$domain'"
+                SMBCLIENT_AUTH="-U '$domain\\$display_user' --pw-nt-hash $hash"
+                SMBGET_USER="$domain/$display_user%$hash"
+                SMBMAP_CREDS="-u '$display_user' -p '$hash' -d '$domain'"
             else
-                SMBCLIENT_AUTH="-U '$user' --pw-nt-hash $hash"
-                SMBGET_USER="$user%$hash"
-                SMBMAP_CREDS="-u '$user' -p '$hash'"
+                SMBCLIENT_AUTH="-U '$display_user' --pw-nt-hash $hash"
+                SMBGET_USER="$display_user%$hash"
+                SMBMAP_CREDS="-u '$display_user' -p '$hash'"
             fi
             XFREERDP_PASS="/pth:$hash"  # For xfreerdp3 with hash
         else
-            IMPACKET_CREDS="$domain/$user:$pass@$IP"
-            WINRM_CREDS="-i $IP -u '$user' -p '$pass'"
+            IMPACKET_CREDS="$domain/$display_user:$pass@$IP"
+            WINRM_CREDS="-i $IP -u '$display_user' -p '$pass'"
             if [ -n "$domain" ]; then
-                SMBCLIENT_AUTH="-U '$domain\\$user%$pass'"
-                SMBGET_USER="$domain/$user%$pass"
-                SMBMAP_CREDS="-u '$user' -p '$pass' -d '$domain'"
+                SMBCLIENT_AUTH="-U '$domain\\$display_user%$pass'"
+                SMBGET_USER="$domain/$display_user%$pass"
+                SMBMAP_CREDS="-u '$display_user' -p '$pass' -d '$domain'"
             else
-                SMBCLIENT_AUTH="-U '$user%$pass'"
-                SMBGET_USER="$user%$pass"
-                SMBMAP_CREDS="-u '$user' -p '$pass'"
+                SMBCLIENT_AUTH="-U '$display_user%$pass'"
+                SMBGET_USER="$display_user%$pass"
+                SMBMAP_CREDS="-u '$display_user' -p '$pass'"
             fi
             XFREERDP_PASS="/p:'$pass'"  # For xfreerdp3 with password
         fi
@@ -1167,10 +1175,10 @@ check_and_suggest() {
                 echo "impacket-mssqlclient $IMPACKET_CREDS"
                 ;;
             "ssh")
-                echo "ssh '$user@$IP'"
+                echo "ssh '$display_user@$IP'"
                 ;;
             "ftp")
-                echo "ftp ftp://$user:$pass@$IP"
+                echo "ftp ftp://$display_user:$pass@$IP"
                 ;;
             "vnc")
                 echo "vncviewer $IP"
@@ -1192,29 +1200,41 @@ check_and_suggest() {
                     base_dn="DC=${domain//./,DC=}"
                     if [ -n "$hash" ]; then
                         echo "# 1. NetExec LDAP enumeration:"
-                        echo "nxc ldap $IP -d '$domain' -u '$user' -H '$hash' --users"
-                        echo "nxc ldap $IP -d '$domain' -u '$user' -H '$hash' --bloodhound -c All"
+                        echo "nxc ldap $IP -d '$domain' -u '$display_user' -H '$hash' --users"
+                        echo "nxc ldap $IP -d '$domain' -u '$display_user' -H '$hash' --bloodhound -c All"
                         echo ""
                         echo "# 2. ldapdomaindump (requires password, not hash):"
-                        echo "# ldapdomaindump -u '$domain\\$user' -p 'PASSWORD' ldap://$IP"
+                        echo "# ldapdomaindump -u '$domain\\$display_user' -p 'PASSWORD' ldap://$IP"
                     else
                         echo "# 1. ldapsearch:"
-                        echo "ldapsearch -x -H ldap://$IP -D \"$user@$domain\" -w '$pass' -b \"$base_dn\" \"(objectClass=*)\""
+                        echo "ldapsearch -x -H ldap://$IP -D \"$display_user@$domain\" -w '$pass' -b \"$base_dn\" \"(objectClass=*)\""
                         echo ""
                         echo "# 2. ldapdomaindump:"
-                        echo "ldapdomaindump -u '$domain\\$user' -p '$pass' ldap://$IP"
+                        echo "ldapdomaindump -u '$domain\\$display_user' -p '$pass' ldap://$IP"
                         echo ""
                         echo "# 3. BloodHound data collection:"
-                        echo "bloodhound-python -u '$user' -p '$pass' -d $domain -ns $IP -c All"
+                        echo "bloodhound-python -u '$display_user' -p '$pass' -d $domain -ns $IP -c All"
                         echo ""
                         echo "# 4. NetExec LDAP enumeration:"
-                        echo "nxc ldap $IP -d '$domain' -u '$user' -p '$pass' --users --bloodhound -c All"
+                        echo "nxc ldap $IP -d '$domain' -u '$display_user' -p '$pass' --users --bloodhound -c All"
                     fi
                 else
                     echo "# Note: Domain name required for LDAP tools. Specify with -d flag"
                 fi
                 ;;
         esac
+        
+        # RDP specific
+        if [ "$service" == "rdp" ]; then
+            if [ -n "$domain" ]; then
+                 echo "xfreerdp3 /v:$IP /u:'$display_user' $XFREERDP_PASS /d:'$domain' /dynamic-resolution +clipboard /cert:ignore"
+                 echo "rdesktop -u '$display_user' -p '$pass' -d '$domain' $IP"
+            else
+                 echo "xfreerdp3 /v:$IP /u:'$display_user' $XFREERDP_PASS /dynamic-resolution +clipboard /cert:ignore"
+                 echo "rdesktop -u '$display_user' -p '$pass' $IP"
+            fi
+            echo "remmina -c rdp://$display_user:$pass@$IP"
+        fi
         echo ""
     fi
 }
@@ -1305,23 +1325,23 @@ if [ "$os_type" = "windows" ]; then
             if echo "$rdp_output" | grep -q "\[+\]"; then
                 echo -e "\n\033[92m[+] RDP access successful! Connect with:\033[0m"
                 if [ -n "$domain" ]; then
-                    echo "xfreerdp3 /v:$IP /u:$domain\\\\$user $XFREERDP_PASS /cert:ignore /clipboard /dynamic-resolution"
+                    echo "xfreerdp3 /v:$IP /u:$domain\\\\$display_user $XFREERDP_PASS /cert:ignore /clipboard /dynamic-resolution"
                 else
-                    echo "xfreerdp3 /v:$IP /u:$user $XFREERDP_PASS /cert:ignore /clipboard /dynamic-resolution"
+                    echo "xfreerdp3 /v:$IP /u:$display_user $XFREERDP_PASS /cert:ignore /clipboard /dynamic-resolution"
                 fi
                 echo ""
                 echo "# Or with rdesktop:"
                 if [ -n "$domain" ]; then
-                    echo "rdesktop -u $user -p '$pass' -d $domain $IP"
+                    echo "rdesktop -u $display_user -p '$pass' -d $domain $IP"
                 else
-                    echo "rdesktop -u $user -p '$pass' $IP"
+                    echo "rdesktop -u $display_user -p '$pass' $IP"
                 fi
                 echo ""
                 echo "# Or with Remmina (command line):"
                 if [ -n "$domain" ]; then
-                    echo "remmina -c 'rdp://$domain\\\\$user:$pass@$IP'"
+                    echo "remmina -c 'rdp://$domain\\\\$display_user:$pass@$IP'"
                 else
-                    echo "remmina -c 'rdp://$user:$pass@$IP'"
+                    echo "remmina -c 'rdp://$display_user:$pass@$IP'"
                 fi
                 echo ""
             fi
