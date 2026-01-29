@@ -836,6 +836,7 @@ if [ "$os_type" = "windows" ]; then
             else
                 echo -e "\033[91m[!] LDAP dump file is empty. Anonymous bind allowed but maybe no read access?\033[0m"
             fi
+            echo -e "\033[96m[+] Suggestion: cat nxc-enum/ldap/ldap-dump-anonymous.txt | grep description \033[0m"
         else
             echo -e "\033[93m[!] Could not determine Base DN automatically.\033[0m"
             echo "Try manual enumeration:"
@@ -896,6 +897,7 @@ if [ "$os_type" = "windows" ]; then
             else
                 echo -e "\033[91m[!] LDAP dump file is empty. Guest bind allowed but maybe no read access?\033[0m"
             fi
+            echo -e "\033[96m[+] Suggestion: cat nxc-enum/ldap/ldap-dump-guest.txt | grep description \033[0m"
         else
             echo -e "\033[93m[!] Could not determine Base DN automatically via Guest.\033[0m"
         fi
