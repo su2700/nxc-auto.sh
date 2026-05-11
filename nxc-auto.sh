@@ -6,7 +6,7 @@ user=""
 pass=""
 domain=""
 hash=""
-os_type="windows"  # Default to Windows
+os_type=""  # Will be auto-detected if not specified
 
 # --- Color Definitions & ADHD Friendly Output ---
 NC='\033[0m'
@@ -55,6 +55,80 @@ log_section() {
     echo -e "\n${BBLUE}━━━━━━━━━━━━━━━ ${BWHITE}${BOLD}$1${BBLUE} ━━━━━━━━━━━━━━━${NC}"
 }
 
+# Function to check if a port is open (uses bash /dev/tcp)
+check_port() {
+    target_ip=$1
+    target_port=$2
+    service_name=$3
+    
+    # Skip check if we don't know the IP (shouldn't happen)
+    if [ -z "$target_ip" ]; then return 0; fi
+
+    # Use bash built-in TCP connection for reliability (avoids nc version/flag issues)
+    # Timeout set to 10 seconds
+    (timeout 10 bash -c "</dev/tcp/$target_ip/$target_port") &>/dev/null
+    result=$?
+
+    if [ $result -eq 0 ]; then
+        return 0 # Port is open
+    else
+        if [ -n "$service_name" ]; then
+             log_warning "Skipping $service_name checks (Port $target_port seems closed)"
+        fi
+        return 1 # Port is closed
+    fi
+}
+
+# Function to auto-detect the target OS
+detect_os() {
+    log_info "Attempting to auto-detect target OS for $IP..."
+    
+    # Priority 1: SMB (Port 445) - Very reliable for Windows
+    if check_port $IP 445; then
+        # Try to get OS info from nxc smb
+        log_info "SMB port 445 is open. Checking OS version with NetExec..."
+        smb_out=$(nxc smb $IP --timeout 5 2>&1)
+        if echo "$smb_out" | grep -qi "windows"; then
+            os_type="windows"
+            log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via NetExec SMB)"
+            return 0
+        elif echo "$smb_out" | grep -qi "linux\|samba"; then
+            os_type="linux"
+            log_success "Auto-detected OS: ${BWHITE}Linux/Samba${NC} (via NetExec SMB)"
+            return 0
+        else
+            os_type="windows"
+            log_info "SMB port 445 open, assuming ${BWHITE}Windows${NC}."
+            return 0
+        fi
+    fi
+
+    # Priority 2: RDP (Port 3389) - Almost always Windows
+    if check_port $IP 3389; then
+        os_type="windows"
+        log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via RDP)"
+        return 0
+    fi
+
+    # Priority 3: SSH (Port 22) - Usually Linux
+    if check_port $IP 22; then
+        os_type="linux"
+        log_success "Auto-detected OS: ${BWHITE}Linux${NC} (via SSH)"
+        return 0
+    fi
+    
+    # Priority 4: WinRM (Ports 5985, 5986) - Windows
+    if check_port $IP 5985 || check_port $IP 5986; then
+        os_type="windows"
+        log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via WinRM)"
+        return 0
+    fi
+
+    # Fallback
+    os_type="windows"
+    log_warning "Could not reliably detect OS. Defaulting to ${BWHITE}Windows${NC}."
+}
+
 # Banner
 print_banner() {
     echo -e "${BCYAN}${BOLD}"
@@ -79,7 +153,7 @@ usage() {
     echo "  -p  Password"
     echo "  -d  Domain"
     echo "  -H  NTLM Hash"
-    echo "  -o  Target OS type: 'w' or 'windows' (default), 'l' or 'linux'"
+    echo "  -o  Target OS type: 'w' or 'windows', 'l' or 'linux' (auto-detected if not specified)"
     echo "  -h  Show this help message"
     echo ""
     echo -e "${BYELLOW}${BOLD}IMPORTANT:${NC} Always quote passwords and usernames with special characters!"
@@ -113,31 +187,12 @@ if [ -z "$IP" ]; then
     usage
 fi
 
+# Auto-detect OS if not specified
+if [ -z "$os_type" ]; then
+    detect_os
+fi
+
 print_banner
-
-# Function to check if a port is open (uses bash /dev/tcp)
-check_port() {
-    target_ip=$1
-    target_port=$2
-    service_name=$3
-    
-    # Skip check if we don't know the IP (shouldn't happen)
-    if [ -z "$target_ip" ]; then return 0; fi
-
-    # Use bash built-in TCP connection for reliability (avoids nc version/flag issues)
-    # Timeout set to 10 seconds
-    (timeout 10 bash -c "</dev/tcp/$target_ip/$target_port") &>/dev/null
-    result=$?
-
-    if [ $result -eq 0 ]; then
-        return 0 # Port is open
-    else
-        if [ -n "$service_name" ]; then
-             log_warning "Skipping $service_name checks (Port $target_port seems closed)"
-        fi
-        return 1 # Port is closed
-    fi
-}
 
 # Helper function to print command and separators
 print_cmd() {
@@ -145,8 +200,6 @@ print_cmd() {
     log_cmd "Executing: $*" >&2
     echo -e "${BBLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
 }
-
-
 log_section "Target Configuration"
 log_info "Target OS Type: ${BWHITE}$os_type${NC}"
 log_info "Logging Enabled: ${BWHITE}$(pwd)/nxc-enum${NC}"
