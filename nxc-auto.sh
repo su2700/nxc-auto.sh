@@ -498,7 +498,7 @@ if [ "$os_type" = "windows" ]; then
                     share=${share#\\}
                     if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
                         echo "smbclient //$IP/$share -U 'guest%' -c 'prompt OFF;recurse ON;mget *'"
-                        echo "# Or with smbget: smbget -R //$IP/$share -U guest%"
+                        echo "# Or with smbget: smbget -R smb://$IP/$share -U guest%"
                     fi
                 fi
             done
@@ -547,7 +547,7 @@ if [ "$os_type" = "windows" ]; then
                     share=${share#\\}
                     if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
                         echo "smbclient //$IP/$share -N -c 'prompt OFF;recurse ON;mget *'"
-                        echo "# Or with smbget: smbget -R //$IP/$share -U %"
+                        echo "# Or with smbget: smbget -R smb://$IP/$share -U %"
                     fi
                 fi
             done
