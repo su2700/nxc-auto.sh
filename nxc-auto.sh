@@ -475,6 +475,24 @@ if [ "$os_type" = "windows" ]; then
             echo "rpcclient -U 'guest%' $IP"
             echo ""
             
+            # Highlight writable shares specifically
+            if echo "$guest_output" | grep -q "WRITE"; then
+                log_error "WRITE ACCESS DETECTED as 'guest' on these shares:"
+                echo "$guest_output" | while read -r line; do
+                    clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                    if [[ "$clean_line" == *"WRITE"* ]]; then
+                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ,WRITE|WRITE)$/) {print $(i-1); exit}}')
+                        share=${share#\\}
+                        if [ ! -z "$share" ]; then
+                            echo -e "  - ${BRED}$share${NC}"
+                            log_info "Upload file to $share:"
+                            echo "smbclient //$IP/$share -U 'guest%' -c 'put local_file.txt remote_file.txt'"
+                        fi
+                    fi
+                done
+                echo ""
+            fi
+            
             # Suggest specific shares if found
             log_info "Connect to shares:"
             echo "$guest_output" | while read -r line; do
@@ -523,6 +541,24 @@ if [ "$os_type" = "windows" ]; then
             log_success "Anonymous SMB access successful! Suggested commands:"
             echo "rpcclient -U '' -N $IP"
             echo ""
+            
+            # Highlight writable shares specifically
+            if echo "$anon_output" | grep -q "WRITE"; then
+                log_error "WRITE ACCESS DETECTED as 'Anonymous' on these shares:"
+                echo "$anon_output" | while read -r line; do
+                    clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                    if [[ "$clean_line" == *"WRITE"* ]]; then
+                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ,WRITE|WRITE)$/) {print $(i-1); exit}}')
+                        share=${share#\\}
+                        if [ ! -z "$share" ]; then
+                            echo -e "  - ${BRED}$share${NC}"
+                            log_info "Upload file to $share:"
+                            echo "smbclient //$IP/$share -N -c 'put local_file.txt remote_file.txt'"
+                        fi
+                    fi
+                done
+                echo ""
+            fi
             
             # Suggest specific shares if found
             log_info "Connect to shares:"
@@ -1223,10 +1259,17 @@ check_and_suggest() {
                 writable_shares=$(echo "$shares_output" | sed 's/\x1b\[[0-9;]*m//g' | grep "WRITE" | awk '{for(i=1;i<=NF;i++) if($i ~ /WRITE/) {print $(i-1); next}}' | sed 's/^\\\//')
                 if [ -n "$writable_shares" ]; then
                     log_error "WRITABLE SHARES FOUND - Potential for privilege escalation!"
-                    log_warning "Writable shares:"
-                    echo "$writable_shares" | while read -r share; do
-                        if [ ! -z "$share" ]; then
-                            echo "  - $share"
+                    log_warning "Writable shares for user '${display_user}':"
+                    echo "$shares_output" | while read -r line; do
+                        clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                        if [[ "$clean_line" == *"WRITE"* ]]; then
+                            share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ,WRITE|WRITE)$/) {print $(i-1); exit}}')
+                            share=${share#\\}
+                            if [ ! -z "$share" ]; then
+                                echo -e "  - ${BRED}$share${NC}"
+                                log_info "Upload file to $share:"
+                                echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'put local_file.txt remote_file.txt'"
+                            fi
                         fi
                     done
                     echo ""
