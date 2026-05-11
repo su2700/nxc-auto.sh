@@ -427,7 +427,7 @@ if [ "$os_type" = "windows" ]; then
             echo "$guest_output" | while read -r line; do
                 clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
                 if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ|WRITE|READ,WRITE)$/) {print $(i-1); exit}}')
                     share=${share#\\}
                     if [ ! -z "$share" ]; then
                         echo "smbclient -U 'guest%' //$IP/$share"
@@ -441,7 +441,7 @@ if [ "$os_type" = "windows" ]; then
             echo "$guest_output" | while read -r line; do
                 clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
                 if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ|WRITE|READ,WRITE)$/) {print $(i-1); exit}}')
                     share=${share#\\}
                     if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
                         echo "smbclient //$IP/$share -U 'guest%' -c 'prompt OFF;recurse ON;mget *'"
@@ -476,7 +476,7 @@ if [ "$os_type" = "windows" ]; then
             echo "$anon_output" | while read -r line; do
                 clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
                 if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ|WRITE|READ,WRITE)$/) {print $(i-1); exit}}')
                     share=${share#\\}
                     if [ ! -z "$share" ]; then
                         echo "smbclient -U '' -N //$IP/$share"
@@ -490,7 +490,7 @@ if [ "$os_type" = "windows" ]; then
             echo "$anon_output" | while read -r line; do
                 clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
                 if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                    share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ|WRITE|READ,WRITE)$/) {print $(i-1); exit}}')
                     share=${share#\\}
                     if [ ! -z "$share" ] && [[ "$share" != "IPC$" ]]; then
                         echo "smbclient //$IP/$share -N -c 'prompt OFF;recurse ON;mget *'"
@@ -1167,7 +1167,7 @@ check_and_suggest() {
                 shares_output="$output"
                 
                 # Check for writable shares and display prominent notice
-                writable_shares=$(echo "$shares_output" | sed 's/\x1b\[[0-9;]*m//g' | grep "WRITE" | awk '{for(i=1;i<=NF;i++) if($i=="WRITE") print $(i-1)}' | sed 's/^\\\//')
+                writable_shares=$(echo "$shares_output" | sed 's/\x1b\[[0-9;]*m//g' | grep "WRITE" | awk '{for(i=1;i<=NF;i++) if($i ~ /WRITE/) {print $(i-1); next}}' | sed 's/^\\\//')
                 if [ -n "$writable_shares" ]; then
                     log_error "WRITABLE SHARES FOUND - Potential for privilege escalation!"
                     log_warning "Writable shares:"
@@ -1191,7 +1191,7 @@ check_and_suggest() {
                     # Check for accessible shares (READ or WRITE)
                     if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
                         # Extract share name (it is the field before READ or WRITE)
-                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ|WRITE|READ,WRITE)$/) {print $(i-1); exit}}')
                         
                         # Remove leading backslash if present
                         share=${share#\\}
@@ -1208,7 +1208,7 @@ check_and_suggest() {
                 echo "$shares_output" | while read -r line; do
                     clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
                     if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i=="READ" || $i=="WRITE") print $(i-1)}')
+                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ|WRITE|READ,WRITE)$/) {print $(i-1); exit}}')
                         share=${share#\\}
                         if [ ! -z "$share" ]; then
                             log_info "Download $share recursively:"
