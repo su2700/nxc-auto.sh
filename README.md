@@ -56,6 +56,20 @@ pipx install ldapdomaindump
 pipx ensurepath
 ```
 
+### Dependency Verification
+
+Run this command to verify all required tools are installed properly:
+
+```bash
+for tool in nxc unbuffer impacket-secretsdump rpcclient smbclient ldapsearch enum4linux enum4linux-ng ldapdomaindump showmount rpcinfo kerbrute certipy; do
+    if command -v "$tool" >/dev/null 2>&1; then
+        echo -e "✅ FOUND: $tool"
+    else
+        echo -e "❌ NOT FOUND: $tool"
+    fi
+done
+```
+
 #### Optional: Kerbrute
 `kerbrute` is highly recommended for user validation and password spraying. If you don't have it, you can install it via:
 
