@@ -120,19 +120,52 @@ detect_target_info() {
                 hosts_entry="$IP $domain"
                 [ -n "$full_host" ] && hosts_entry="$IP $full_host $domain"
                 
-                if ! grep -q "$domain" /etc/hosts 2>/dev/null; then
-                    echo -e "\n${BYELLOW}❓ Do you want to add '${BWHITE}$hosts_entry${NC}${BYELLOW}' to /etc/hosts?${NC}"
+                # Check if the domain is in /etc/hosts and if it matches the current IP
+                existing_ip=$(grep -w "$domain" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
+                needs_update=false
+                update_required=false
+
+                if [ -z "$existing_ip" ]; then
+                    needs_update=true
+                elif [ "$existing_ip" != "$IP" ]; then
+                    log_warning "Domain '$domain' exists in /etc/hosts but points to ${BWHITE}$existing_ip${NC} instead of ${BWHITE}$IP${NC}"
+                    needs_update=true
+                    update_required=true
+                fi
+
+                # Check for full_host if it exists and wasn't already marked for update
+                if [ "$needs_update" = "false" ] && [ -n "$full_host" ]; then
+                     existing_ip_full=$(grep -w "$full_host" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
+                     if [ -n "$existing_ip_full" ] && [ "$existing_ip_full" != "$IP" ]; then
+                         log_warning "Host '$full_host' exists in /etc/hosts but points to ${BWHITE}$existing_ip_full${NC} instead of ${BWHITE}$IP${NC}"
+                         needs_update=true
+                         update_required=true
+                     fi
+                fi
+
+                if [ "$needs_update" = "true" ]; then
+                    if [ "$update_required" = "true" ]; then
+                        echo -e "\n${BYELLOW}❓ Do you want to UPDATE /etc/hosts entry for '${BWHITE}$domain${NC}${BYELLOW}' to '${BWHITE}$IP${NC}${BYELLOW}'?${NC}"
+                    else
+                        echo -e "\n${BYELLOW}❓ Do you want to add '${BWHITE}$hosts_entry${NC}${BYELLOW}' to /etc/hosts?${NC}"
+                    fi
                     echo -e "${BCYAN}   (Recommended for better Kerberos/DNS resolution)${NC}"
                     read -p "   [y/N]: " choice
                     case "$choice" in 
                         y|Y ) 
+                            if [ "$update_required" = "true" ]; then
+                                # Remove old entries for both domain and full_host if they exist
+                                sudo sed -i "/[[:space:]]${domain}\($\|[[:space:]]\)/d" /etc/hosts
+                                [ -n "$full_host" ] && sudo sed -i "/[[:space:]]${full_host}\($\|[[:space:]]\)/d" /etc/hosts
+                                log_info "Removed old entries from /etc/hosts"
+                            fi
                             echo "$hosts_entry" | sudo tee -a /etc/hosts >/dev/null
-                            log_success "Added to /etc/hosts"
+                            log_success "Added/Updated /etc/hosts"
                             ;;
                         * ) log_info "Skipping /etc/hosts update";;
                     esac
                 else
-                    log_info "Domain already exists in /etc/hosts"
+                    log_info "Domain already exists in /etc/hosts with correct IP"
                 fi
             fi
         fi
@@ -665,19 +698,52 @@ detect_target_info() {
                 hosts_entry="$IP $domain"
                 [ -n "$full_host" ] && hosts_entry="$IP $full_host $domain"
                 
-                if ! grep -q "$domain" /etc/hosts 2>/dev/null; then
-                    echo -e "\n${BYELLOW}❓ Do you want to add '${BWHITE}$hosts_entry${NC}${BYELLOW}' to /etc/hosts?${NC}"
+                # Check if the domain is in /etc/hosts and if it matches the current IP
+                existing_ip=$(grep -w "$domain" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
+                needs_update=false
+                update_required=false
+
+                if [ -z "$existing_ip" ]; then
+                    needs_update=true
+                elif [ "$existing_ip" != "$IP" ]; then
+                    log_warning "Domain '$domain' exists in /etc/hosts but points to ${BWHITE}$existing_ip${NC} instead of ${BWHITE}$IP${NC}"
+                    needs_update=true
+                    update_required=true
+                fi
+
+                # Check for full_host if it exists and wasn't already marked for update
+                if [ "$needs_update" = "false" ] && [ -n "$full_host" ]; then
+                     existing_ip_full=$(grep -w "$full_host" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
+                     if [ -n "$existing_ip_full" ] && [ "$existing_ip_full" != "$IP" ]; then
+                         log_warning "Host '$full_host' exists in /etc/hosts but points to ${BWHITE}$existing_ip_full${NC} instead of ${BWHITE}$IP${NC}"
+                         needs_update=true
+                         update_required=true
+                     fi
+                fi
+
+                if [ "$needs_update" = "true" ]; then
+                    if [ "$update_required" = "true" ]; then
+                        echo -e "\n${BYELLOW}❓ Do you want to UPDATE /etc/hosts entry for '${BWHITE}$domain${NC}${BYELLOW}' to '${BWHITE}$IP${NC}${BYELLOW}'?${NC}"
+                    else
+                        echo -e "\n${BYELLOW}❓ Do you want to add '${BWHITE}$hosts_entry${NC}${BYELLOW}' to /etc/hosts?${NC}"
+                    fi
                     echo -e "${BCYAN}   (Recommended for better Kerberos/DNS resolution)${NC}"
                     read -p "   [y/N]: " choice
                     case "$choice" in 
                         y|Y ) 
+                            if [ "$update_required" = "true" ]; then
+                                # Remove old entries for both domain and full_host if they exist
+                                sudo sed -i "/[[:space:]]${domain}\($\|[[:space:]]\)/d" /etc/hosts
+                                [ -n "$full_host" ] && sudo sed -i "/[[:space:]]${full_host}\($\|[[:space:]]\)/d" /etc/hosts
+                                log_info "Removed old entries from /etc/hosts"
+                            fi
                             echo "$hosts_entry" | sudo tee -a /etc/hosts >/dev/null
-                            log_success "Added to /etc/hosts"
+                            log_success "Added/Updated /etc/hosts"
                             ;;
                         * ) log_info "Skipping /etc/hosts update";;
                     esac
                 else
-                    log_info "Domain already exists in /etc/hosts"
+                    log_info "Domain already exists in /etc/hosts with correct IP"
                 fi
             fi
         fi
