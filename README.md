@@ -36,9 +36,10 @@ chmod +x nxc-auto.sh
 
 ### Kali Linux Quick Start
 
-If you are using Kali Linux, you can install all necessary dependencies with a single command:
+If you are using Kali Linux, you can install the necessary system dependencies and tools:
 
 ```bash
+# Install system dependencies
 sudo apt update && sudo apt install -y \
     netexec \
     impacket-scripts \
@@ -47,8 +48,12 @@ sudo apt update && sudo apt install -y \
     ldap-utils \
     enum4linux \
     enum4linux-ng \
-    ldapdomaindump \
-    nfs-common
+    nfs-common \
+    pipx
+
+# Install ldapdomaindump via pipx (Recommended)
+pipx install ldapdomaindump
+pipx ensurepath
 ```
 
 #### Optional: Kerbrute
