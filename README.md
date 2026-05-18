@@ -26,11 +26,47 @@ A professional, modular automated enumeration script leveraging **NetExec (nxc)*
 ### Installation
 
 ```bash
-# Install NetExec
+# Clone the repository
+git clone https://github.com/su2700/nxc-auto.sh.git
+cd nxc-auto.sh
+
+# Install NetExec (if not already installed)
 pip install netexec
 
 # Install Dependencies
-apt-get install expect impacket-scripts smbclient ldap-utils
+sudo apt-get install expect impacket-scripts smbclient ldap-utils
+
+# Make the script executable
+chmod +x nxc-auto.sh
+```
+
+### Global Access (Recommended)
+
+To run `nxc-auto.sh` from any directory, you can add it to your system PATH.
+
+#### Option 1: Create a symbolic link (Easiest)
+This allows you to run the script using the command `nxc-auto`.
+
+```bash
+sudo ln -s "$(pwd)/nxc-auto.sh" /usr/local/bin/nxc-auto
+```
+
+#### Option 2: Add to .bashrc or .zshrc
+Add the script's directory to your PATH variable.
+
+```bash
+# For Bash
+echo "export PATH=\$PATH:$(pwd)" >> ~/.bashrc
+source ~/.bashrc
+
+# For Zsh
+echo "export PATH=\$PATH:$(pwd)" >> ~/.zshrc
+source ~/.zshrc
+```
+
+Now you can run the script from anywhere using:
+```bash
+nxc-auto.sh -i <IP>
 ```
 
 ## Usage
