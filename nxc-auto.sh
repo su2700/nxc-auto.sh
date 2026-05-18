@@ -1617,28 +1617,8 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
             fi
 
 
-            # FTP and LDAP anonymous checks (Windows-specific)
+            # LDAP anonymous checks (Windows-specific)
             if [ "$os_type" = "windows" ]; then
-                log_section "FTP Anonymous Access"
-                print_cmd "nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 30"
-                ftp_output=$(timeout 60s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 30)
-                echo "$ftp_output"
-
-                # Check if anonymous FTP access succeeded and suggest commands
-                if echo "$ftp_output" | grep -q "\[+\]"; then
-                    log_success "Anonymous FTP access successful! Suggested commands:"
-                    echo "ftp $IP"
-                    echo "# Username: anonymous"
-                    echo "# Password: anonymous"
-                    echo ""
-                    log_info "Or use lftp for better features:"
-                    echo "lftp -u anonymous,anonymous $IP"
-                    echo ""
-                    log_info "Download all files recursively:"
-                    echo "wget -r ftp://anonymous:anonymous@$IP/"
-                    echo ""
-                fi
-
                 log_section "LDAP Anonymous Access"
                 if ! check_port $IP 389 "LDAP"; then
                     log_warning "Port 389 (LDAP) seems closed. Skipping LDAP Anonymous Access."
@@ -1831,6 +1811,12 @@ if echo "$nfs_output" | grep -qE "r--|rw-|rwx" || echo "$showmount_output" | gre
         done < <(echo "$showmount_output" | grep "^/")
     fi
     echo ""
+fi
+}
+
+# Run anonymous enumeration early ONLY if no credentials were provided
+if [ -z "$user" ]; then
+    run_anonymous_enumeration
 fi
 
 
@@ -2785,10 +2771,30 @@ else
     log_warning "Skipping SSH/FTP Enumeration (no username supplied)"
 fi
 
-# FTP Unauthenticated / Banner Grab (Check for ProFTPD Exploit)
-log_section "FTP Banner Grab & Exploit Check"
+# FTP Unauthenticated / Anonymous & Banner Grab (Check for ProFTPD Exploit)
+log_section "FTP Unauthenticated & Exploit Check"
 if check_port $IP 21; then
     log_success "FTP port 21 is OPEN!"
+
+    log_info "FTP Anonymous Access"
+    print_cmd "nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 30"
+    ftp_output=$(timeout 60s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 30)
+    echo "$ftp_output"
+
+    # Check if anonymous FTP access succeeded and suggest commands
+    if echo "$ftp_output" | grep -q "\[+\]"; then
+        log_success "Anonymous FTP access successful! Suggested commands:"
+        echo "ftp $IP"
+        echo "# Username: anonymous"
+        echo "# Password: anonymous"
+        echo ""
+        log_info "Or use lftp for better features:"
+        echo "lftp -u anonymous,anonymous $IP"
+        echo ""
+        log_info "Download all files recursively:"
+        echo "wget -r ftp://anonymous:anonymous@$IP/"
+        echo ""
+    fi
 
     # Grab banner
     log_info "FTP Banner:"
@@ -2933,6 +2939,16 @@ if [ "$os_type" = "windows" ] && { check_port $IP 5985 || check_port $IP 5986; }
         fi
 
         if echo "$val_out" | grep -q "+"; then
+            log_success "Success! Launching shell..."
+            evil-winrm $WINRM_CREDS
+        else
+            log_error "Error: Username or password are wrong for WinRM access on $IP"
+            log_warning "(Note: Also possible that WinRM timed out - increased limit to 120s)"
+        fi
+    else
+        log_warning "WinRM is open, but no valid credentials were provided or discovered."
+    fi
+firep -q "+"; then
             log_success "Success! Launching shell..."
             evil-winrm $WINRM_CREDS
         else
