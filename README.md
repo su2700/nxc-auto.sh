@@ -30,14 +30,35 @@ A professional, modular automated enumeration script leveraging **NetExec (nxc)*
 git clone https://github.com/su2700/nxc-auto.sh.git
 cd nxc-auto.sh
 
-# Install NetExec (if not already installed)
-pip install netexec
-
-# Install Dependencies
-sudo apt-get install expect impacket-scripts smbclient ldap-utils
-
 # Make the script executable
 chmod +x nxc-auto.sh
+```
+
+### Kali Linux Quick Start
+
+If you are using Kali Linux, you can install all necessary dependencies with a single command:
+
+```bash
+sudo apt update && sudo apt install -y \
+    netexec \
+    impacket-scripts \
+    expect \
+    smbclient \
+    ldap-utils \
+    enum4linux \
+    enum4linux-ng \
+    ldapdomaindump \
+    nfs-common
+```
+
+#### Optional: Kerbrute
+`kerbrute` is highly recommended for user validation and password spraying. If you don't have it, you can install it via:
+
+```bash
+# Download the latest release (example for Linux amd64)
+wget https://github.com/ropnop/kerbrute/releases/latest/download/kerbrute_linux_amd64 -O kerbrute
+chmod +x kerbrute
+sudo mv kerbrute /usr/local/bin/
 ```
 
 ### Global Access (Recommended)
