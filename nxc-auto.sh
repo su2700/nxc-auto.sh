@@ -129,6 +129,67 @@ detect_os() {
     log_warning "Could not reliably detect OS. Defaulting to ${BWHITE}Windows${NC}."
 }
 
+# Function to check if all needed tools are installed
+check_dependencies() {
+    log_section "Checking Dependencies"
+    
+    local missing_tools=()
+    local install_cmds=()
+    
+    # Define tools and their installation commands for Kali
+    declare -A tools
+    tools["nxc"]="sudo apt update && sudo apt install netexec -y"
+    tools["impacket-lookupsid"]="sudo apt update && sudo apt install python3-impacket -y"
+    tools["rpcclient"]="sudo apt update && sudo apt install smbclient -y"
+    tools["ldapsearch"]="sudo apt update && sudo apt install ldap-utils -y"
+    tools["showmount"]="sudo apt update && sudo apt install nfs-common -y"
+    tools["enum4linux"]="sudo apt update && sudo apt install enum4linux -y"
+    tools["ldapdomaindump"]="sudo apt update && sudo apt install ldapdomaindump -y"
+    tools["smbmap"]="sudo apt update && sudo apt install smbmap -y"
+    tools["certipy"]="pipx install certipy-ad"
+    tools["unbuffer"]="sudo apt update && sudo apt install expect -y"
+    
+    # Check for each tool
+    for tool in "${!tools[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            # Special check for impacket tools which might be named tool.py
+            if [[ "$tool" == impacket-* ]]; then
+                local alt_tool="${tool#impacket-}.py"
+                if command -v "$alt_tool" &> /dev/null; then
+                    continue
+                fi
+            fi
+            
+            missing_tools+=("$tool")
+            install_cmds+=("${tools[$tool]}")
+        fi
+    done
+    
+    # If tools are missing, inform the user
+    if [ ${#missing_tools[@]} -gt 0 ]; then
+        log_warning "The following tools are missing:"
+        for i in "${!missing_tools[@]}"; do
+            echo -e "  - ${BRED}${missing_tools[$i]}${NC}"
+        done
+        
+        echo ""
+        log_info "To install them on Kali Linux, run:"
+        # Unique install commands
+        printf "%s\n" "${install_cmds[@]}" | sort -u | while read -r cmd; do
+            echo -e "  ${BMAGENTA}$cmd${NC}"
+        done
+        echo ""
+        
+        read -p "⚠️  Some enumeration modules will fail. Do you want to continue anyway? (y/N): " choice
+        case "$choice" in 
+          y|Y ) log_info "Continuing without missing tools...";;
+          * ) log_error "Exiting. Please install missing dependencies."; exit 1;;
+        esac
+    else
+        log_success "All essential tools are installed!"
+    fi
+}
+
 # Banner
 print_banner() {
     echo -e "${BCYAN}${BOLD}"
@@ -192,6 +253,9 @@ if [ -z "$os_type" ]; then
     detect_os
 fi
 
+# Check for dependencies
+check_dependencies
+
 print_banner
 
 # Helper function to print command and separators
@@ -230,8 +294,6 @@ check_nxc_db
 
 # Check for unbuffer command and stub it if missing
 if ! command -v unbuffer &> /dev/null; then
-    log_warning "'unbuffer' (part of 'expect' package) is not installed."
-    log_info "Output might not be captured in real-time. Continuing anyway..."
     unbuffer() { "$@"; }
 fi
 
