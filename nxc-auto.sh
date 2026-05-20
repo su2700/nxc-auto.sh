@@ -218,6 +218,8 @@ check_dependencies() {
     tools["smbmap"]="sudo apt update && sudo apt install smbmap -y"
     tools["certipy"]="pipx install certipy-ad"
     tools["unbuffer"]="sudo apt update && sudo apt install expect -y"
+    tools["nikto"]="sudo apt update && sudo apt install nikto -y"
+    tools["curl"]="sudo apt update && sudo apt install curl -y"
     
     # Check for each tool
     for tool in "${!tools[@]}"; do
@@ -474,6 +476,8 @@ check_dependencies() {
     tools["smbmap"]="sudo apt update && sudo apt install smbmap -y"
     tools["certipy"]="pipx install certipy-ad"
     tools["unbuffer"]="sudo apt update && sudo apt install expect -y"
+    tools["nikto"]="sudo apt update && sudo apt install nikto -y"
+    tools["curl"]="sudo apt update && sudo apt install curl -y"
     
     # Check for each tool
     for tool in "${!tools[@]}"; do
@@ -622,7 +626,7 @@ if [ -n "$pass" ]; then
     log_warning "make sure you quoted it properly: -p 'P@\$\$W0rd'"
 fi
 
-mkdir -p nxc-enum nxc-enum/smb nxc-enum/ldap
+mkdir -p nxc-enum nxc-enum/smb nxc-enum/ldap nxc-enum/http
 
 # Check for nxc database schema issues and auto-fix
 check_nxc_db() {
@@ -2552,6 +2556,32 @@ else
     log_info "If you believe this is an error, try manually:"
     echo "    nc -nv $IP 23"
 fi
+
+# Web Enumeration (HTTP/HTTPS)
+log_section "Web Enumeration (HTTP/HTTPS)"
+web_ports=(80 443 8080 8443)
+for port in "${web_ports[@]}"; do
+    if check_port $IP $port; then
+        protocol="http"
+        if [[ "$port" == "443" || "$port" == "8443" ]]; then
+            protocol="https"
+        fi
+        url="${protocol}://${IP}:${port}"
+        log_success "Port $port is OPEN ($protocol)!"
+        
+        log_info "Banner Grab (curl):"
+        print_cmd "curl -I -k -s -m 5 $url"
+        curl -I -k -s -m 5 $url 2>/dev/null | tee nxc-enum/http/headers_${port}.txt
+        
+        log_info "NetExec HTTP Info:"
+        print_cmd "nxc http $IP --port $port"
+        unbuffer nxc http $IP --port $port 2>/dev/null | tee nxc-enum/http/nxc_http_${port}.txt
+        
+        log_info "Nikto Scan (Timed):"
+        print_cmd "nikto -h $url -Tuning 123b"
+        timeout 300s nikto -h $url -Tuning 123b -output nxc-enum/http/nikto_${port}.txt
+    fi
+done
 
 # Advanced DACL enumeration (requires credentials)
 if [ "$os_type" = "windows" ] && [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
