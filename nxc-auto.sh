@@ -53,7 +53,33 @@ log_cmd() {
     printf "${BMAGENTA}🚀 [>] %s${NC}\n" "$1"
 }
 
+# Function to check if the target is still alive to prevent hanging
+check_target_alive() {
+    # Skip check if IP is not set yet
+    if [ -z "$IP" ]; then return 0; fi
+    
+    # 1. Quick Ping check (1 packet, 1 second timeout)
+    if ping -c 1 -W 1 "$IP" &> /dev/null; then
+        return 0
+    fi
+    
+    # 2. Fallback TCP check on common ports in case ICMP is blocked
+    # Use bash /dev/tcp logic with a 1 second timeout for speed
+    for port in 445 3389 22 80 443 389 139 5985; do
+        if timeout 1 bash -c "</dev/tcp/$IP/$port" &>/dev/null; then
+            return 0
+        fi
+    done
+    
+    echo -e "\n${BRED}${BOLD}🚨 CRITICAL ERROR: TARGET APPEARS OFFLINE 🚨${NC}"
+    log_error "Target $IP is no longer responding to ping or common TCP ports."
+    log_error "Stopping all scans to prevent hanging processes."
+    log_info "Please check your network connection, VPN status, or if the target rebooted."
+    exit 1
+}
+
 log_section() {
+    check_target_alive
     printf "\n${BBLUE}━━━━━━━━━━━━━━━ ${BWHITE}${BOLD}%s${BBLUE} ━━━━━━━━━━━━━━━${NC}\n" "$1"
 }
 
