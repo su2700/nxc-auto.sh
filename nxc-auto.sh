@@ -80,6 +80,67 @@ check_port() {
     fi
 }
 
+# Function to update /etc/hosts
+update_hosts_file() {
+    local target_domain=$1
+    local target_full_host=$2
+    local target_ip=$3
+    
+    if [ -z "$target_domain" ] || [ "$target_domain" == "$target_ip" ]; then
+        return
+    fi
+
+    # Check if the domain is in /etc/hosts and if it matches the current IP
+    local existing_ip=$(grep -w "$target_domain" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
+    local needs_update=false
+    local update_required=false
+    local hosts_entry="$target_ip $target_domain"
+    [ -n "$target_full_host" ] && hosts_entry="$target_ip $target_full_host $target_domain"
+
+    if [ -z "$existing_ip" ]; then
+        needs_update=true
+    elif [ "$existing_ip" != "$target_ip" ]; then
+        log_warning "Domain '$target_domain' exists in /etc/hosts but points to ${BWHITE}$existing_ip${NC} instead of ${BWHITE}$target_ip${NC}"
+        needs_update=true
+        update_required=true
+    fi
+
+    # Check for full_host if it exists and wasn't already marked for update
+    if [ "$needs_update" = "false" ] && [ -n "$target_full_host" ]; then
+         local existing_ip_full=$(grep -w "$target_full_host" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
+         if [ -n "$existing_ip_full" ] && [ "$existing_ip_full" != "$target_ip" ]; then
+             log_warning "Host '$target_full_host' exists in /etc/hosts but points to ${BWHITE}$existing_ip_full${NC} instead of ${BWHITE}$target_ip${NC}"
+             needs_update=true
+             update_required=true
+         fi
+    fi
+
+    if [ "$needs_update" = "true" ]; then
+        if [ "$update_required" = "true" ]; then
+            echo -e "\n${BYELLOW}❓ Do you want to UPDATE /etc/hosts entry for '${BWHITE}$target_domain${NC}${BYELLOW}' to '${BWHITE}$target_ip${NC}${BYELLOW}'?${NC}"
+        else
+            echo -e "\n${BYELLOW}❓ Do you want to add '${BWHITE}$hosts_entry${NC}${BYELLOW}' to /etc/hosts?${NC}"
+        fi
+        echo -e "${BCYAN}   (Recommended for better Kerberos/DNS resolution)${NC}"
+        read -p "   [y/N]: " choice
+        case "$choice" in 
+            y|Y ) 
+                if [ "$update_required" = "true" ]; then
+                    # Remove old entries for both domain and full_host if they exist
+                    sudo sed -i "/[[:space:]]${target_domain}\($\|[[:space:]]\)/d" /etc/hosts
+                    [ -n "$target_full_host" ] && sudo sed -i "/[[:space:]]${target_full_host}\($\|[[:space:]]\)/d" /etc/hosts
+                    log_info "Removed old entries from /etc/hosts"
+                fi
+                echo "$hosts_entry" | sudo tee -a /etc/hosts >/dev/null
+                log_success "Added/Updated /etc/hosts"
+                ;;
+            * ) log_info "Skipping /etc/hosts update";;
+        esac
+    else
+        log_info "Domain '$target_domain' already exists in /etc/hosts with correct IP"
+    fi
+}
+
 # Function to auto-detect the target OS and Domain info
 detect_target_info() {
     log_info "Attempting to auto-detect target OS and Domain for $IP..."
@@ -117,80 +178,79 @@ detect_target_info() {
                     full_host="$discovered_name.$domain"
                 fi
 
-                # Prompt to add to /etc/hosts
-                hosts_entry="$IP $domain"
-                [ -n "$full_host" ] && hosts_entry="$IP $full_host $domain"
-                
-                # Check if the domain is in /etc/hosts and if it matches the current IP
-                existing_ip=$(grep -w "$domain" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
-                needs_update=false
-                update_required=false
-
-                if [ -z "$existing_ip" ]; then
-                    needs_update=true
-                elif [ "$existing_ip" != "$IP" ]; then
-                    log_warning "Domain '$domain' exists in /etc/hosts but points to ${BWHITE}$existing_ip${NC} instead of ${BWHITE}$IP${NC}"
-                    needs_update=true
-                    update_required=true
-                fi
-
-                # Check for full_host if it exists and wasn't already marked for update
-                if [ "$needs_update" = "false" ] && [ -n "$full_host" ]; then
-                     existing_ip_full=$(grep -w "$full_host" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
-                     if [ -n "$existing_ip_full" ] && [ "$existing_ip_full" != "$IP" ]; then
-                         log_warning "Host '$full_host' exists in /etc/hosts but points to ${BWHITE}$existing_ip_full${NC} instead of ${BWHITE}$IP${NC}"
-                         needs_update=true
-                         update_required=true
-                     fi
-                fi
-
-                if [ "$needs_update" = "true" ]; then
-                    if [ "$update_required" = "true" ]; then
-                        echo -e "\n${BYELLOW}❓ Do you want to UPDATE /etc/hosts entry for '${BWHITE}$domain${NC}${BYELLOW}' to '${BWHITE}$IP${NC}${BYELLOW}'?${NC}"
-                    else
-                        echo -e "\n${BYELLOW}❓ Do you want to add '${BWHITE}$hosts_entry${NC}${BYELLOW}' to /etc/hosts?${NC}"
-                    fi
-                    echo -e "${BCYAN}   (Recommended for better Kerberos/DNS resolution)${NC}"
-                    read -p "   [y/N]: " choice
-                    case "$choice" in 
-                        y|Y ) 
-                            if [ "$update_required" = "true" ]; then
-                                # Remove old entries for both domain and full_host if they exist
-                                sudo sed -i "/[[:space:]]${domain}\($\|[[:space:]]\)/d" /etc/hosts
-                                [ -n "$full_host" ] && sudo sed -i "/[[:space:]]${full_host}\($\|[[:space:]]\)/d" /etc/hosts
-                                log_info "Removed old entries from /etc/hosts"
-                            fi
-                            echo "$hosts_entry" | sudo tee -a /etc/hosts >/dev/null
-                            log_success "Added/Updated /etc/hosts"
-                            ;;
-                        * ) log_info "Skipping /etc/hosts update";;
-                    esac
-                else
-                    log_info "Domain already exists in /etc/hosts with correct IP"
-                fi
+                update_hosts_file "$domain" "$full_host" "$IP"
             fi
         fi
         return 0
     fi
 
-    # Priority 2: RDP (Port 3389) - Almost always Windows
-    if check_port $IP 3389; then
+    # Priority 2: LDAP (Port 389) - AD Domain Controller
+    if check_port $IP 389; then
         os_type="windows"
-        log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via RDP)"
+        log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via LDAP)"
+        
+        if [ -z "$domain" ]; then
+            log_info "Attempting to extract domain info via LDAP..."
+            ldap_out=$(nxc ldap $IP --timeout 5 2>&1)
+            discovered_domain=$(echo "$ldap_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+            discovered_name=$(echo "$ldap_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
+
+            if [ -n "$discovered_domain" ] && [ "$discovered_domain" != "$IP" ]; then
+                domain="$discovered_domain"
+                log_success "Auto-discovered domain: ${BWHITE}$domain${NC} (via LDAP)"
+                full_host=""
+                [ -n "$discovered_name" ] && full_host="$discovered_name.$domain"
+                update_hosts_file "$domain" "$full_host" "$IP"
+            fi
+        fi
         return 0
     fi
 
-    # Priority 3: SSH (Port 22) - Usually Linux
+    # Priority 3: RDP (Port 3389) - Almost always Windows
+    if check_port $IP 3389; then
+        os_type="windows"
+        log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via RDP)"
+
+        if [ -z "$domain" ]; then
+            log_info "Attempting to extract domain info via RDP..."
+            rdp_out=$(nxc rdp $IP --timeout 5 2>&1)
+            discovered_domain=$(echo "$rdp_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+            
+            if [ -n "$discovered_domain" ] && [ "$discovered_domain" != "$IP" ]; then
+                domain="$discovered_domain"
+                log_success "Auto-discovered domain: ${BWHITE}$domain${NC} (via RDP)"
+                update_hosts_file "$domain" "" "$IP"
+            fi
+        fi
+        return 0
+    fi
+
+    # Priority 4: SSH (Port 22) - Usually Linux
     if check_port $IP 22; then
         os_type="linux"
         log_success "Auto-detected OS: ${BWHITE}Linux${NC} (via SSH)"
         return 0
     fi
     
-    # Priority 4: WinRM (Ports 5985, 5986) - Windows
+    # Priority 5: WinRM (Ports 5985, 5986) - Windows
     if check_port $IP 5985 || check_port $IP 5986; then
         os_type="windows"
         log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via WinRM)"
+
+        if [ -z "$domain" ]; then
+            log_info "Attempting to extract domain info via WinRM..."
+            winrm_out=$(nxc winrm $IP --timeout 5 2>&1)
+            discovered_domain=$(echo "$winrm_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+            discovered_name=$(echo "$winrm_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
+
+            if [ -n "$discovered_domain" ] && [ "$discovered_domain" != "$IP" ]; then
+                domain="$discovered_domain"
+                log_success "Auto-discovered domain: ${BWHITE}$domain${NC} (via WinRM)"
+                full_host=""
+                [ -n "$discovered_name" ] && full_host="$discovered_name.$domain"
+                update_hosts_file "$domain" "$full_host" "$IP"
+            fi
+        fi
         return 0
     fi
 
@@ -335,191 +395,6 @@ promote_verified_creds() {
     fi
 }
 
-# Helper function to run nxc and suggest login command if successful
-# Redundant definition removed. See second definition later in the script.
-
-# Function to auto-detect the target OS and Domain info
-detect_target_info() {
-    log_info "Attempting to auto-detect target OS and Domain for $IP..."
-    
-    # Priority 1: SMB (Port 445) - Very reliable for Windows/AD
-    if check_port $IP 445; then
-        # Try to get OS info from nxc smb
-        log_info "SMB port 445 is open. Checking info with NetExec..."
-        smb_out=$(nxc smb $IP --timeout 5 2>&1)
-        
-        # Extract OS type
-        if echo "$smb_out" | grep -qi "windows"; then
-            os_type="windows"
-            log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via NetExec SMB)"
-        elif echo "$smb_out" | grep -qi "linux\|samba"; then
-            os_type="linux"
-            log_success "Auto-detected OS: ${BWHITE}Linux/Samba${NC} (via NetExec SMB)"
-        else
-            os_type="windows"
-            log_info "SMB port 445 open, assuming ${BWHITE}Windows${NC}."
-        fi
-
-        # Extract Domain if not already provided
-        if [ -z "$domain" ]; then
-            discovered_domain=$(echo "$smb_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
-            discovered_name=$(echo "$smb_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
-            
-            if [ -n "$discovered_domain" ] && [ "$discovered_domain" != "$IP" ]; then
-                domain="$discovered_domain"
-                log_success "Auto-discovered domain: ${BWHITE}$domain${NC}"
-                
-                # Check if FQDN or just domain
-                full_host=""
-                if [ -n "$discovered_name" ]; then
-                    full_host="$discovered_name.$domain"
-                fi
-
-                # Prompt to add to /etc/hosts
-                hosts_entry="$IP $domain"
-                [ -n "$full_host" ] && hosts_entry="$IP $full_host $domain"
-                
-                # Check if the domain is in /etc/hosts and if it matches the current IP
-                existing_ip=$(grep -w "$domain" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
-                needs_update=false
-                update_required=false
-
-                if [ -z "$existing_ip" ]; then
-                    needs_update=true
-                elif [ "$existing_ip" != "$IP" ]; then
-                    log_warning "Domain '$domain' exists in /etc/hosts but points to ${BWHITE}$existing_ip${NC} instead of ${BWHITE}$IP${NC}"
-                    needs_update=true
-                    update_required=true
-                fi
-
-                # Check for full_host if it exists and wasn't already marked for update
-                if [ "$needs_update" = "false" ] && [ -n "$full_host" ]; then
-                     existing_ip_full=$(grep -w "$full_host" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
-                     if [ -n "$existing_ip_full" ] && [ "$existing_ip_full" != "$IP" ]; then
-                         log_warning "Host '$full_host' exists in /etc/hosts but points to ${BWHITE}$existing_ip_full${NC} instead of ${BWHITE}$IP${NC}"
-                         needs_update=true
-                         update_required=true
-                     fi
-                fi
-
-                if [ "$needs_update" = "true" ]; then
-                    if [ "$update_required" = "true" ]; then
-                        echo -e "\n${BYELLOW}❓ Do you want to UPDATE /etc/hosts entry for '${BWHITE}$domain${NC}${BYELLOW}' to '${BWHITE}$IP${NC}${BYELLOW}'?${NC}"
-                    else
-                        echo -e "\n${BYELLOW}❓ Do you want to add '${BWHITE}$hosts_entry${NC}${BYELLOW}' to /etc/hosts?${NC}"
-                    fi
-                    echo -e "${BCYAN}   (Recommended for better Kerberos/DNS resolution)${NC}"
-                    read -p "   [y/N]: " choice
-                    case "$choice" in 
-                        y|Y ) 
-                            if [ "$update_required" = "true" ]; then
-                                # Remove old entries for both domain and full_host if they exist
-                                sudo sed -i "/[[:space:]]${domain}\($\|[[:space:]]\)/d" /etc/hosts
-                                [ -n "$full_host" ] && sudo sed -i "/[[:space:]]${full_host}\($\|[[:space:]]\)/d" /etc/hosts
-                                log_info "Removed old entries from /etc/hosts"
-                            fi
-                            echo "$hosts_entry" | sudo tee -a /etc/hosts >/dev/null
-                            log_success "Added/Updated /etc/hosts"
-                            ;;
-                        * ) log_info "Skipping /etc/hosts update";;
-                    esac
-                else
-                    log_info "Domain already exists in /etc/hosts with correct IP"
-                fi
-            fi
-        fi
-        return 0
-    fi
-
-    # Priority 2: RDP (Port 3389) - Almost always Windows
-    if check_port $IP 3389; then
-        os_type="windows"
-        log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via RDP)"
-        return 0
-    fi
-
-    # Priority 3: SSH (Port 22) - Usually Linux
-    if check_port $IP 22; then
-        os_type="linux"
-        log_success "Auto-detected OS: ${BWHITE}Linux${NC} (via SSH)"
-        return 0
-    fi
-    
-    # Priority 4: WinRM (Ports 5985, 5986) - Windows
-    if check_port $IP 5985 || check_port $IP 5986; then
-        os_type="windows"
-        log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via WinRM)"
-        return 0
-    fi
-
-    # Fallback
-    os_type="windows"
-    log_warning "Could not reliably detect OS. Defaulting to ${BWHITE}Windows${NC}."
-}
-
-# Function to check if all needed tools are installed
-check_dependencies() {
-    log_section "Checking Dependencies"
-    
-    local missing_tools=()
-    local install_cmds=()
-    
-    # Define tools and their installation commands for Kali
-    declare -A tools
-    tools["nxc"]="sudo apt update && sudo apt install netexec -y"
-    tools["impacket-lookupsid"]="sudo apt update && sudo apt install python3-impacket -y"
-    tools["rpcclient"]="sudo apt update && sudo apt install smbclient -y"
-    tools["ldapsearch"]="sudo apt update && sudo apt install ldap-utils -y"
-    tools["showmount"]="sudo apt update && sudo apt install nfs-common -y"
-    tools["enum4linux"]="sudo apt update && sudo apt install enum4linux -y"
-    tools["ldapdomaindump"]="sudo apt update && sudo apt install ldapdomaindump -y"
-    tools["smbmap"]="sudo apt update && sudo apt install smbmap -y"
-    tools["certipy"]="pipx install certipy-ad"
-    tools["unbuffer"]="sudo apt update && sudo apt install expect -y"
-    tools["nikto"]="sudo apt update && sudo apt install nikto -y"
-    tools["curl"]="sudo apt update && sudo apt install curl -y"
-    
-    # Check for each tool
-    for tool in "${!tools[@]}"; do
-        if ! command -v "$tool" &> /dev/null; then
-            # Special check for impacket tools which might be named tool.py
-            if [[ "$tool" == impacket-* ]]; then
-                local alt_tool="${tool#impacket-}.py"
-                if command -v "$alt_tool" &> /dev/null; then
-                    continue
-                fi
-            fi
-            
-            missing_tools+=("$tool")
-            install_cmds+=("${tools[$tool]}")
-        fi
-    done
-    
-    # If tools are missing, inform the user
-    if [ ${#missing_tools[@]} -gt 0 ]; then
-        log_warning "The following tools are missing:"
-        for i in "${!missing_tools[@]}"; do
-            echo -e "  - ${BRED}${missing_tools[$i]}${NC}"
-        done
-        
-        echo ""
-        log_info "To install them on Kali Linux, run:"
-        # Unique install commands
-        printf "%s\n" "${install_cmds[@]}" | sort -u | while read -r cmd; do
-            echo -e "  ${BMAGENTA}$cmd${NC}"
-        done
-        echo ""
-        
-        read -p "⚠️  Some enumeration modules will fail. Do you want to continue anyway? (y/N): " choice
-        case "$choice" in 
-          y|Y ) log_info "Continuing without missing tools...";;
-          * ) log_error "Exiting. Please install missing dependencies."; exit 1;;
-        esac
-    else
-        log_success "All essential tools are installed!"
-    fi
-}
-
 # Banner
 print_banner() {
     echo -e "${BCYAN}${BOLD}"
@@ -629,19 +504,6 @@ fi
 mkdir -p nxc-enum nxc-enum/smb nxc-enum/ldap nxc-enum/http
 
 # Check for nxc database schema issues and auto-fix
-check_nxc_db() {
-    if command -v nxc &> /dev/null; then
-        # Run a quick check against localhost to trigger potential DB errors
-        check_out=$(nxc smb 127.0.0.1 --timeout 1 2>&1)
-        if echo "$check_out" | grep -q "Schema mismatch detected"; then
-             log_warning "NXC DB Schema mismatch detected during self-check. Auto-fixing..."
-             # Try deleting DBs for both current user and root (if running as root)
-             rm -f ~/.nxc/workspaces/default/*.db 2>/dev/null
-             rm -f /root/.nxc/workspaces/default/*.db 2>/dev/null
-             log_success "Database files removed. NetExec will re-initialize them on the next run."
-        fi
-    fi
-}
 check_nxc_db
 
 # Check for unbuffer command and stub it if missing
@@ -654,69 +516,9 @@ VALID_CREDS_FILE="nxc-enum/valid_credentials.txt"
 POTENTIAL_CREDS_FILE="nxc-enum/potential_credentials.txt"
 > "$POTENTIAL_CREDS_FILE"
 
-# Function to promote a working credential to the primary user
-promote_verified_creds() {
-    if [ -s "$VALID_CREDS_FILE" ] && { [ -f "$user" ] || [ -z "$user" ] || [ "$HAS_PROMOTED" != "true" ]; }; then
-        # Pick the first one (usually the one nxc found first)
-        local best_cred=$(head -n 1 "$VALID_CREDS_FILE")
-        local disc_domain=""
-        local remainder=""
-        local disc_user=""
-        local disc_secret=""
-        
-        if [[ "$best_cred" == *"\\"* ]]; then
-            disc_domain=$(echo "$best_cred" | cut -d'\' -f1)
-            remainder=$(echo "$best_cred" | cut -d'\' -f2-)
-        else
-            remainder="$best_cred"
-        fi
-        
-        disc_user=$(echo "$remainder" | cut -d: -f1)
-        disc_secret=$(echo "$remainder" | cut -d: -f2-)
-        
-        # Don't promote if it's the same as what we already have (unless we had a file)
-        [ "$user" == "$disc_user" ] && [ ! -f "$user" ] && return
-        
-        log_success "Found valid credentials: ${BWHITE}$best_cred${NC}"
-        log_info "Promoting '${BWHITE}$disc_user${NC}' as primary user for deep-dive enumeration..."
-        
-        # Update globals
-        [ -n "$disc_domain" ] && domain="$disc_domain"
-        user="$disc_user"
-        
-        # Determine if hash or password
-        if [[ "$disc_secret" =~ ^[0-9a-fA-F]{32}$ ]] || [[ "$disc_secret" =~ ^[0-9a-fA-F]{32}:[0-9a-fA-F]{32}$ ]]; then
-            hash="$disc_secret"
-            pass=""
-        else
-            pass="$disc_secret"
-            hash=""
-        fi
-        
-        # Re-build flags
-        if [ -n "$domain" ]; then DOMAIN_FLAG="-d $domain"; else DOMAIN_FLAG=""; fi
-        if [ -n "$hash" ]; then
-            USER_FLAG="-u $user -H $hash"
-            RPC_ARG="-U $domain\\\\$user --pw-nt-hash $hash"
-            SECRETS_ARG="-hashes :$hash $domain/$user@$IP"
-            RPCDUMP_ARG="-u $user -hashes :$hash -d $domain"
-        elif [ -n "$pass" ]; then
-            USER_FLAG="-u $user -p $pass"
-            RPC_ARG="-U $domain\\\\$user%$pass"
-            SECRETS_ARG="$domain/$user:$pass@$IP"
-            RPCDUMP_ARG="-u $user -p $pass -d $domain"
-        fi
-        
-        HAS_PROMOTED="true"
-        log_info "Flags updated. Subsequent checks will use '${BWHITE}$user${NC}' credentials."
-    fi
-}
-
+# Helper function to run nxc and suggest login command if successful
 # Show Impacket tools suggestions if credentials provided
-if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then
-    log_section "Impacket Tools - Quick Reference"
-    echo ""
-    
+if [ -n "$user" ] && { [ -n "$pass" ] || [ -n "$hash" ]; }; then    
     # Build credential string
     if [ -n "$hash" ]; then
         cred_string="$user -hashes :$hash"
