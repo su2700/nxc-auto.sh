@@ -43,19 +43,20 @@ cd nxc-auto.sh
 
 ## Global Access (Recommended)
 
-To run `nxc-auto` from any directory, set up symbolic links for both versions.
+To run `nxc-auto` from any directory on Linux, set up symbolic links for both versions.
 
 ### Option 1: Symbolic Links (Recommended)
 This allows you to run the scripts from anywhere using the designated command names.
 
 ```bash
-# Set up Python version command (nxc-auto-py)
-sudo ln -s "$(pwd)/nxc-auto.py" /usr/local/bin/nxc-auto-py
-sudo chmod +x /usr/local/bin/nxc-auto-py
+# 1. Make scripts executable
+chmod +x nxc-auto.py nxc-auto.sh
 
-# Set up Bash version command (nxc-auto)
+# 2. Set up Python version command (nxc-auto-py)
+sudo ln -s "$(pwd)/nxc-auto.py" /usr/local/bin/nxc-auto-py
+
+# 3. Set up Bash version command (nxc-auto)
 sudo ln -s "$(pwd)/nxc-auto.sh" /usr/local/bin/nxc-auto
-sudo chmod +x /usr/local/bin/nxc-auto
 ```
 
 ### Usage After Setup
