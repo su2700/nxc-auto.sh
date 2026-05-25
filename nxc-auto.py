@@ -67,8 +67,6 @@ class State:
 
 # --- Utility Functions ---
 
-# --- Utility Functions ---
-
 async def check_dependencies():
     log_section("Checking Dependencies")
     tools = {
@@ -400,77 +398,6 @@ async def enum_smb(anonymous=True):
         cmd.append("--shares")
         await check_and_suggest("smb", cmd)
 
-async def detect_target_info():
-    log_info(f"Attempting to auto-detect target OS and Domain for {State.IP}...")
-    
-    # Check ports in parallel
-    port_tasks = {
-        445: "SMB",
-        389: "LDAP",
-        3389: "RDP",
-        22: "SSH",
-        5985: "WinRM"
-    }
-    
-    open_ports = []
-    results = await asyncio.gather(*[check_port(State.IP, p) for p in port_tasks.keys()])
-    for i, p in enumerate(port_tasks.keys()):
-        if results[i]:
-            open_ports.append(p)
-
-    # Priority 1: SMB (Port 445)
-    if 445 in open_ports:
-        rc, out = await async_run_cmd(["nxc", "smb", State.IP, "--timeout", "5"])
-        if "windows" in out.lower():
-            State.OS_TYPE = "windows"
-            log_success(f"Auto-detected OS: {Colors.BWHITE}Windows{Colors.NC} (via NetExec SMB)")
-        elif "linux" in out.lower() or "samba" in out.lower():
-            State.OS_TYPE = "linux"
-            log_success(f"Auto-detected OS: {Colors.BWHITE}Linux/Samba{Colors.NC} (via NetExec SMB)")
-        else:
-            State.OS_TYPE = "windows"
-            log_info(f"SMB port 445 open, assuming {Colors.BWHITE}Windows{Colors.NC}.")
-
-        if not State.DOMAIN:
-            domain_match = re.search(r'domain:([^\s\)]+)', out)
-            name_match = re.search(r'name:([^\s\)]+)', out)
-            if domain_match:
-                State.DOMAIN = domain_match.group(1).strip()
-                log_success(f"Auto-discovered domain: {Colors.BWHITE}{State.DOMAIN}{Colors.NC}")
-                full_host = f"{name_match.group(1)}.{State.DOMAIN}" if name_match else ""
-                update_hosts_file(State.DOMAIN, full_host, State.IP)
-        return
-
-    # Priority 2: LDAP (Port 389)
-    if 389 in open_ports:
-        State.OS_TYPE = "windows"
-        log_success(f"Auto-detected OS: {Colors.BWHITE}Windows{Colors.NC} (via LDAP)")
-        if not State.DOMAIN:
-            rc, out = await async_run_cmd(["nxc", "ldap", State.IP, "--timeout", "5"])
-            domain_match = re.search(r'domain:([^\s\)]+)', out)
-            if domain_match:
-                State.DOMAIN = domain_match.group(1).strip()
-                log_success(f"Auto-discovered domain: {Colors.BWHITE}{State.DOMAIN}{Colors.NC} (via LDAP)")
-                update_hosts_file(State.DOMAIN, "", State.IP)
-        return
-
-    # Priority 3: RDP (Port 3389)
-    if 3389 in open_ports:
-        State.OS_TYPE = "windows"
-        log_success(f"Auto-detected OS: {Colors.BWHITE}Windows{Colors.NC} (via RDP)")
-        return
-
-    # Priority 4: SSH (Port 22)
-    if 22 in open_ports:
-        State.OS_TYPE = "linux"
-        log_success(f"Auto-detected OS: {Colors.BWHITE}Linux{Colors.NC} (via SSH)")
-        return
-
-    # Fallback
-    if not State.OS_TYPE:
-        State.OS_TYPE = "windows"
-        log_warning(f"Could not reliably detect OS. Defaulting to {Colors.BWHITE}Windows{Colors.NC}.")
-
 async def enum_ldap(anonymous=True):
     if not await check_port(State.IP, 389, "LDAP"): return
     log_section(f"LDAP Enumeration ({'Anonymous' if anonymous else 'Authenticated'})")
@@ -537,70 +464,6 @@ async def enum_rdp():
         if State.HASH: cmd.extend(["-H", State.HASH])
         if State.DOMAIN: cmd.extend(["-d", State.DOMAIN])
         await check_and_suggest("rdp", cmd)
-
-async def main():
-    print_banner()
-    args = parse_args()
-    
-    # Create enumeration directory
-    os.makedirs(State.ENUM_DIR, exist_ok=True)
-    for sub in ['smb', 'ldap', 'http']:
-        os.makedirs(os.path.join(State.ENUM_DIR, sub), exist_ok=True)
-        
-    await check_dependencies()
-    
-    log_section("Target Configuration")
-    log_info(f"Target IP: {Colors.BWHITE}{State.IP}{Colors.NC}")
-    
-    await check_target_alive(State.IP)
-    
-    # Discovery
-    if not State.OS_TYPE or not State.DOMAIN:
-        await detect_target_info()
-    
-    log_info(f"Target OS Type: {Colors.BWHITE}{State.OS_TYPE}{Colors.NC}")
-    if State.DOMAIN:
-        log_info(f"Target Domain: {Colors.BWHITE}{State.DOMAIN}{Colors.NC}")
-
-    # Initialize files
-    with open(State.VALID_CREDS_FILE, "w") as f: pass
-    with open(State.POTENTIAL_CREDS_FILE, "w") as f: pass
-
-    # Phase 1: Anonymous Enumeration
-    if not State.USER:
-        # Run SMB and LDAP anonymous checks in parallel
-        await asyncio.gather(
-            enum_smb(anonymous=True),
-            enum_ldap(anonymous=True)
-        )
-        
-        # Try to promote any found creds
-        if promote_verified_creds():
-            log_success("Successfully promoted discovered credentials!")
-            
-    # Phase 2: Authenticated Enumeration (if we have creds)
-    if State.USER:
-        log_section("Authenticated Enumeration")
-        # Run these in sequence or selective parallel
-        if State.OS_TYPE == "windows":
-            await enum_smb(anonymous=False)
-            await enum_ldap(anonymous=False)
-            await enum_rpc()
-            await enum_rdp()
-        else:
-            await enum_smb(anonymous=False) # Samba on Linux
-            
-    # Phase 3: Other Services (Parallel)
-    log_section("Additional Service Checks")
-    await asyncio.gather(
-        enum_nfs(),
-        enum_ftp()
-    )
-    
-    log_section("Enumeration Complete")
-    log_success(f"Results saved in: {Colors.BWHITE}{os.path.abspath(State.ENUM_DIR)}{Colors.NC}")
-    if os.path.exists(State.VALID_CREDS_FILE) and os.path.getsize(State.VALID_CREDS_FILE) > 0:
-        log_success(f"Valid credentials found! Check: {State.VALID_CREDS_FILE}")
 
 async def async_run_cmd(cmd: List[str], timeout: int = 300) -> Tuple[int, str]:
     """Runs a shell command asynchronously and returns return code and output."""
@@ -698,11 +561,60 @@ async def main():
     for sub in ['smb', 'ldap', 'http']:
         os.makedirs(os.path.join(State.ENUM_DIR, sub), exist_ok=True)
         
+    await check_dependencies()
+    
     log_section("Target Configuration")
     log_info(f"Target IP: {Colors.BWHITE}{State.IP}{Colors.NC}")
     
     await check_target_alive(State.IP)
-    log_success(f"Target {State.IP} is alive.")
+    
+    # Discovery
+    if not State.OS_TYPE or not State.DOMAIN:
+        await detect_target_info()
+    
+    log_info(f"Target OS Type: {Colors.BWHITE}{State.OS_TYPE}{Colors.NC}")
+    if State.DOMAIN:
+        log_info(f"Target Domain: {Colors.BWHITE}{State.DOMAIN}{Colors.NC}")
+
+    # Initialize files
+    with open(State.VALID_CREDS_FILE, "w") as f: pass
+    with open(State.POTENTIAL_CREDS_FILE, "w") as f: pass
+
+    # Phase 1: Anonymous Enumeration
+    if not State.USER:
+        # Run SMB and LDAP anonymous checks in parallel
+        await asyncio.gather(
+            enum_smb(anonymous=True),
+            enum_ldap(anonymous=True)
+        )
+        
+        # Try to promote any found creds
+        if promote_verified_creds():
+            log_success("Successfully promoted discovered credentials!")
+            
+    # Phase 2: Authenticated Enumeration (if we have creds)
+    if State.USER:
+        log_section("Authenticated Enumeration")
+        # Run these in sequence or selective parallel
+        if State.OS_TYPE == "windows":
+            await enum_smb(anonymous=False)
+            await enum_ldap(anonymous=False)
+            await enum_rpc()
+            await enum_rdp()
+        else:
+            await enum_smb(anonymous=False) # Samba on Linux
+            
+    # Phase 3: Other Services (Parallel)
+    log_section("Additional Service Checks")
+    await asyncio.gather(
+        enum_nfs(),
+        enum_ftp()
+    )
+    
+    log_section("Enumeration Complete")
+    log_success(f"Results saved in: {Colors.BWHITE}{os.path.abspath(State.ENUM_DIR)}{Colors.NC}")
+    if os.path.exists(State.VALID_CREDS_FILE) and os.path.getsize(State.VALID_CREDS_FILE) > 0:
+        log_success(f"Valid credentials found! Check: {State.VALID_CREDS_FILE}")
 
 if __name__ == "__main__":
     try:
