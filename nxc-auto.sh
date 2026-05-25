@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# NOTE: A Python version with parallel execution is now available: nxc-auto.py
+# Use 'python3 nxc-auto.py -i <IP>' for faster enumeration.
+
 # Default values
 IP=""
 user=""

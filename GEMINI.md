@@ -1,21 +1,22 @@
 # GEMINI.md - nxc-auto.sh Project Context
 
 ## Project Overview
-`nxc-auto.sh` is a professional, modular automated enumeration script designed for penetration testing. It leverages **NetExec (nxc)** and other industry-standard tools to perform comprehensive reconnaissance of infrastructure and Active Directory environments.
+`nxc-auto.sh` (and the new `nxc-auto.py`) is a professional, modular automated enumeration script designed for penetration testing. It leverages **NetExec (nxc)** and other industry-standard tools to perform comprehensive reconnaissance of infrastructure and Active Directory environments.
 
 ### Core Features
+- **Async Python Version:** `nxc-auto.py` provides parallelized enumeration for significantly faster results.
 - **Modular Design:** Protocol-specific enumeration modules (SMB, LDAP, etc.).
 - **OS-Aware:** Tailors enumeration logic based on the target OS (Windows or Linux).
 - **Smart Suggestions:** Provides actionable commands (like `rpcclient` top 10) when access is gained.
 - **Credential Promotion:** Automatically uses discovered credentials for deeper scans.
 
 ## Building and Running
-As a Bash-based project, no "build" step is required. Ensure dependencies like `netexec`, `impacket`, and `smbclient` are installed.
+No build step is required. Ensure dependencies like `netexec`, `impacket`, and `smbclient` are installed.
 
 ### Key Commands
-- **Run Enumeration:** `./nxc-auto.sh -i <IP> [-u <USER>] [-p <PASS>] [-d <DOMAIN>]`
-- **Linux Mode:** `./nxc-auto.sh -i <IP> -o l`
-- **Help:** `./nxc-auto.sh -h`
+- **Run Python Version (Recommended):** `python3 nxc-auto.py -i <IP> [-u <USER>] [-p <PASS>] [-d <DOMAIN>]`
+- **Run Bash Version:** `./nxc-auto.sh -i <IP> [-u <USER>] [-p <PASS>] [-d <DOMAIN>]`
+- **Help:** `python3 nxc-auto.py -h`
 
 ## Development Conventions
 - **Standardized Logging:** Use `log_info`, `log_success`, `log_warning`, and `log_error`.
