@@ -53,7 +53,6 @@ This allows you to run the scripts from anywhere using the designated command na
 chmod +x nxc-auto.py nxc-auto.sh
 
 # 2. Set up Python version command (nxc-auto-py)
-sudo ln -s "$(pwd)/nxc-auto.py" /usr/local/bin/nxc-auto-py
 
 # 3. Set up Bash version command (nxc-auto)
 sudo ln -s "$(pwd)/nxc-auto.sh" /usr/local/bin/nxc-auto
@@ -103,11 +102,8 @@ pipx ensurepath
 
 ### 🐍 Python Version (Recommended)
 ```bash
-python3 nxc-auto.py -i <IP> [-u USER] [-p PASSWORD] [-d DOMAIN] [-H HASH] [-o OS_TYPE] [--stealth]
+python3 nxc-auto.py -i <IP> [-u USER] [-p PASSWORD] [-d DOMAIN] [-H HASH] [-o OS_TYPE]
 ```
-
-**New Arguments:**
-- `--stealth`: **(Strategy C)** Limit concurrency and add random delays to avoid triggering IPS/firewalls.
 
 ### 🐚 Bash Version
 ```bash
