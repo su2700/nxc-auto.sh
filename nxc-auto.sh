@@ -3,6 +3,24 @@
 # NOTE: A Python version with parallel execution is now available: nxc-auto.py
 # Use 'python3 nxc-auto.py -i <IP>' for faster enumeration.
 
+# --- Fix PATH for Sudo/Pipx ---
+# Add common local bin paths to PATH if they exist
+for p in "$HOME/.local/bin" "/usr/local/bin" "/home/$USER/.local/bin"; do
+    if [ -d "$p" ] && [[ ":$PATH:" != *":$p:"* ]]; then
+        export PATH="$PATH:$p"
+    fi
+done
+
+# If run with sudo, also add the original user's local bin
+if [ -n "$SUDO_USER" ]; then
+    user_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    p="$user_home/.local/bin"
+    if [ -d "$p" ] && [[ ":$PATH:" != *":$p:"* ]]; then
+        export PATH="$PATH:$p"
+    fi
+fi
+# ----------------------------
+
 # Default values
 IP=""
 user=""
@@ -110,70 +128,77 @@ check_port() {
     fi
 }
 
-# Function to update /etc/hosts
+# Function to update /etc/hosts with multiple names
 update_hosts_file() {
-    local target_domain=$1
-    local target_full_host=$2
-    local target_ip=$3
+    local target_ip=$1
+    shift
+    local target_names=("$@")
     
-    if [ -z "$target_domain" ] || [ "$target_domain" == "$target_ip" ]; then
+    if [ -z "$target_ip" ] || [ ${#target_names[@]} -eq 0 ]; then
         return
     fi
 
-    # Check if the domain is in /etc/hosts and if it matches the current IP
-    local existing_ip=$(grep -w "$target_domain" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
+    # Deduplicate and filter names
+    local unique_names=()
+    for name in "${target_names[@]}"; do
+        if [ -n "$name" ] && [ "$name" != "$target_ip" ]; then
+            # Case insensitive deduplication
+            local exists=false
+            for u in "${unique_names[@]}"; do
+                if [[ "${u,,}" == "${name,,}" ]]; then exists=true; break; fi
+            done
+            if [ "$exists" = false ]; then
+                unique_names+=("$name")
+            fi
+        fi
+    done
+
+    if [ ${#unique_names[@]} -eq 0 ]; then return; fi
+
     local needs_update=false
-    local update_required=false
-    local hosts_entry="$target_ip $target_domain"
-    [ -n "$target_full_host" ] && hosts_entry="$target_ip $target_full_host $target_domain"
+    local conflict_names=()
+    local missing_names=()
 
-    if [ -z "$existing_ip" ]; then
-        needs_update=true
-    elif [ "$existing_ip" != "$target_ip" ]; then
-        log_warning "Domain '$target_domain' exists in /etc/hosts but points to ${BWHITE}$existing_ip${NC} instead of ${BWHITE}$target_ip${NC}"
-        needs_update=true
-        update_required=true
-    fi
-
-    # Check for full_host if it exists and wasn't already marked for update
-    if [ "$needs_update" = "false" ] && [ -n "$target_full_host" ]; then
-         local existing_ip_full=$(grep -w "$target_full_host" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
-         if [ -n "$existing_ip_full" ] && [ "$existing_ip_full" != "$target_ip" ]; then
-             log_warning "Host '$target_full_host' exists in /etc/hosts but points to ${BWHITE}$existing_ip_full${NC} instead of ${BWHITE}$target_ip${NC}"
-             needs_update=true
-             update_required=true
-         fi
-    fi
+    for name in "${unique_names[@]}"; do
+        local existing_ip=$(grep -w "$name" /etc/hosts 2>/dev/null | awk '{print $1}' | head -n1)
+        if [ -z "$existing_ip" ]; then
+            missing_names+=("$name")
+            needs_update=true
+        elif [ "$existing_ip" != "$target_ip" ]; then
+            conflict_names+=("$name ($existing_ip)")
+            needs_update=true
+        fi
+    done
 
     if [ "$needs_update" = "true" ]; then
-        if [ "$update_required" = "true" ]; then
-            echo -e "\n${BYELLOW}❓ Do you want to UPDATE /etc/hosts entry for '${BWHITE}$target_domain${NC}${BYELLOW}' to '${BWHITE}$target_ip${NC}${BYELLOW}'?${NC}"
-        else
-            echo -e "\n${BYELLOW}❓ Do you want to add '${BWHITE}$hosts_entry${NC}${BYELLOW}' to /etc/hosts?${NC}"
-        fi
-        echo -e "${BCYAN}   (Recommended for better Kerberos/DNS resolution)${NC}"
-        read -p "   [y/N]: " choice
+        echo -e "\n${BYELLOW}❓ Hostname mapping needs update for ${BWHITE}$target_ip${NC}${BYELLOW}:"
+        [ ${#missing_names[@]} -gt 0 ] && echo -e "   ${BCYAN}Missing:${NC} ${missing_names[*]}"
+        [ ${#conflict_names[@]} -gt 0 ] && echo -e "   ${BRED}Conflicts:${NC} ${conflict_names[*]}"
+        
+        read -p "   Do you want to update /etc/hosts? [y/N]: " choice
         case "$choice" in 
             y|Y ) 
-                if [ "$update_required" = "true" ]; then
-                    # Remove old entries for both domain and full_host if they exist
-                    sudo sed -i "/[[:space:]]${target_domain}\($\|[[:space:]]\)/d" /etc/hosts
-                    [ -n "$target_full_host" ] && sudo sed -i "/[[:space:]]${target_full_host}\($\|[[:space:]]\)/d" /etc/hosts
-                    log_info "Removed old entries from /etc/hosts"
-                fi
-                echo "$hosts_entry" | sudo tee -a /etc/hosts >/dev/null
-                log_success "Added/Updated /etc/hosts"
+                # Remove existing entries for all names to avoid duplicates/conflicts
+                for name in "${unique_names[@]}"; do
+                    sudo sed -i "/[[:space:]]${name}\($\|[[:space:]]\)/d" /etc/hosts
+                done
+                
+                # Add the new consolidated entry
+                local hosts_line="$target_ip ${unique_names[*]}"
+                echo "$hosts_line" | sudo tee -a /etc/hosts >/dev/null
+                log_success "Updated /etc/hosts with: ${BWHITE}$hosts_line${NC}"
                 ;;
             * ) log_info "Skipping /etc/hosts update";;
         esac
     else
-        log_info "Domain '$target_domain' already exists in /etc/hosts with correct IP"
+        log_info "All hostnames (${unique_names[*]}) already correctly mapped in /etc/hosts"
     fi
 }
 
 # Function to auto-detect the target OS and Domain info
 detect_target_info() {
     log_info "Attempting to auto-detect target OS and Domain for $IP..."
+    local discovered_names=()
     
     # Priority 1: SMB (Port 445) - Very reliable for Windows/AD
     if check_port $IP 445; then
@@ -193,24 +218,27 @@ detect_target_info() {
             log_info "SMB port 445 open, assuming ${BWHITE}Windows${NC}."
         fi
 
-        # Extract Domain if not already provided
-        if [ -z "$domain" ]; then
-            discovered_domain=$(echo "$smb_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
-            discovered_name=$(echo "$smb_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
+        # Extract Names
+        local disc_domain=$(echo "$smb_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+        local disc_name=$(echo "$smb_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
+        
+        if [ -n "$disc_domain" ] && [ "$disc_domain" != "$IP" ]; then
+            domain="$disc_domain"
+            log_success "Auto-discovered domain: ${BWHITE}$domain${NC}"
+            discovered_names+=("$domain")
             
-            if [ -n "$discovered_domain" ] && [ "$discovered_domain" != "$IP" ]; then
-                domain="$discovered_domain"
-                log_success "Auto-discovered domain: ${BWHITE}$domain${NC}"
-                
-                # Check if FQDN or just domain
-                full_host=""
-                if [ -n "$discovered_name" ]; then
-                    full_host="$discovered_name.$domain"
-                fi
-
-                update_hosts_file "$domain" "$full_host" "$IP"
+            # constructed FQDN
+            [ -n "$disc_name" ] && discovered_names+=("$disc_name.$domain")
+            
+            # Forest root (if domain has 3 or more parts, e.g. lab.enterprise.thm -> enterprise.thm)
+            if [[ "$domain" =~ .*\..*\..* ]]; then
+                local forest_root=$(echo "$domain" | cut -d. -f2-)
+                discovered_names+=("$forest_root")
             fi
         fi
+        [ -n "$disc_name" ] && discovered_names+=("$disc_name")
+
+        update_hosts_file "$IP" "${discovered_names[@]}"
         return 0
     fi
 
@@ -219,20 +247,25 @@ detect_target_info() {
         os_type="windows"
         log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via LDAP)"
         
-        if [ -z "$domain" ]; then
-            log_info "Attempting to extract domain info via LDAP..."
-            ldap_out=$(nxc ldap $IP --timeout 5 2>&1)
-            discovered_domain=$(echo "$ldap_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
-            discovered_name=$(echo "$ldap_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
+        log_info "Attempting to extract domain info via LDAP..."
+        ldap_out=$(nxc ldap $IP --timeout 5 2>&1)
+        local disc_domain=$(echo "$ldap_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+        local disc_name=$(echo "$ldap_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
 
-            if [ -n "$discovered_domain" ] && [ "$discovered_domain" != "$IP" ]; then
-                domain="$discovered_domain"
-                log_success "Auto-discovered domain: ${BWHITE}$domain${NC} (via LDAP)"
-                full_host=""
-                [ -n "$discovered_name" ] && full_host="$discovered_name.$domain"
-                update_hosts_file "$domain" "$full_host" "$IP"
+        if [ -n "$disc_domain" ] && [ "$disc_domain" != "$IP" ]; then
+            domain="$disc_domain"
+            log_success "Auto-discovered domain: ${BWHITE}$domain${NC} (via LDAP)"
+            discovered_names+=("$domain")
+            [ -n "$disc_name" ] && discovered_names+=("$disc_name.$domain")
+            
+            if [[ "$domain" =~ .*\..*\..* ]]; then
+                local forest_root=$(echo "$domain" | cut -d. -f2-)
+                discovered_names+=("$forest_root")
             fi
         fi
+        [ -n "$disc_name" ] && discovered_names+=("$disc_name")
+        
+        update_hosts_file "$IP" "${discovered_names[@]}"
         return 0
     fi
 
@@ -241,17 +274,20 @@ detect_target_info() {
         os_type="windows"
         log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via RDP)"
 
-        if [ -z "$domain" ]; then
-            log_info "Attempting to extract domain info via RDP..."
-            rdp_out=$(nxc rdp $IP --timeout 5 2>&1)
-            discovered_domain=$(echo "$rdp_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
-            
-            if [ -n "$discovered_domain" ] && [ "$discovered_domain" != "$IP" ]; then
-                domain="$discovered_domain"
-                log_success "Auto-discovered domain: ${BWHITE}$domain${NC} (via RDP)"
-                update_hosts_file "$domain" "" "$IP"
-            fi
+        log_info "Attempting to extract domain info via RDP..."
+        rdp_out=$(nxc rdp $IP --timeout 5 2>&1)
+        local disc_domain=$(echo "$rdp_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+        local disc_name=$(echo "$rdp_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
+        
+        if [ -n "$disc_domain" ] && [ "$disc_domain" != "$IP" ]; then
+            domain="$disc_domain"
+            log_success "Auto-discovered domain: ${BWHITE}$domain${NC} (via RDP)"
+            discovered_names+=("$domain")
+            [ -n "$disc_name" ] && discovered_names+=("$disc_name.$domain")
         fi
+        [ -n "$disc_name" ] && discovered_names+=("$disc_name")
+
+        update_hosts_file "$IP" "${discovered_names[@]}"
         return 0
     fi
 
@@ -267,20 +303,20 @@ detect_target_info() {
         os_type="windows"
         log_success "Auto-detected OS: ${BWHITE}Windows${NC} (via WinRM)"
 
-        if [ -z "$domain" ]; then
-            log_info "Attempting to extract domain info via WinRM..."
-            winrm_out=$(nxc winrm $IP --timeout 5 2>&1)
-            discovered_domain=$(echo "$winrm_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
-            discovered_name=$(echo "$winrm_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
+        log_info "Attempting to extract domain info via WinRM..."
+        winrm_out=$(nxc winrm $IP --timeout 5 2>&1)
+        local disc_domain=$(echo "$winrm_out" | grep -oP '(?<=domain:)[^\)]+' | head -n1 | tr -d ' ')
+        local disc_name=$(echo "$winrm_out" | grep -oP '(?<=name:)[^\)]+' | head -n1 | tr -d ' ')
 
-            if [ -n "$discovered_domain" ] && [ "$discovered_domain" != "$IP" ]; then
-                domain="$discovered_domain"
-                log_success "Auto-discovered domain: ${BWHITE}$domain${NC} (via WinRM)"
-                full_host=""
-                [ -n "$discovered_name" ] && full_host="$discovered_name.$domain"
-                update_hosts_file "$domain" "$full_host" "$IP"
-            fi
+        if [ -n "$disc_domain" ] && [ "$disc_domain" != "$IP" ]; then
+            domain="$disc_domain"
+            log_success "Auto-discovered domain: ${BWHITE}$domain${NC} (via WinRM)"
+            discovered_names+=("$domain")
+            [ -n "$disc_name" ] && discovered_names+=("$disc_name.$domain")
         fi
+        [ -n "$disc_name" ] && discovered_names+=("$disc_name")
+
+        update_hosts_file "$IP" "${discovered_names[@]}"
         return 0
     fi
 
@@ -308,16 +344,20 @@ check_dependencies() {
     tools["smbmap"]="sudo apt update && sudo apt install smbmap -y"
     tools["certipy"]="pipx install certipy-ad"
     tools["unbuffer"]="sudo apt update && sudo apt install expect -y"
-    tools["nikto"]="sudo apt update && sudo apt install nikto -y"
     tools["curl"]="sudo apt update && sudo apt install curl -y"
     
     # Check for each tool
     for tool in "${!tools[@]}"; do
         if ! command -v "$tool" &> /dev/null; then
+            # Special check for common local installation paths (pipx, etc.)
+            if [ -f "$HOME/.local/bin/$tool" ] || [ -f "/usr/local/bin/$tool" ]; then
+                continue
+            fi
+
             # Special check for impacket tools which might be named tool.py
             if [[ "$tool" == impacket-* ]]; then
                 local alt_tool="${tool#impacket-}.py"
-                if command -v "$alt_tool" &> /dev/null; then
+                if command -v "$alt_tool" &> /dev/null || [ -f "$HOME/.local/bin/$alt_tool" ]; then
                     continue
                 fi
             fi
@@ -458,22 +498,25 @@ usage() {
 }
 
 # Parse arguments
-while getopts "i:u:p:d:H:o:h" opt; do
-    case $opt in
-        i) IP="$OPTARG" ;;
-        u) user="$OPTARG" ;;
-        p) pass="$OPTARG" ;;
-        d) domain="$OPTARG" ;;
-        H) hash="$OPTARG" ;;
-        o) 
-            case "${OPTARG,,}" in  # Convert to lowercase
+# Using a more flexible approach to handle long options
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -i) IP="$2"; shift 2 ;;
+        -u) user="$2"; shift 2 ;;
+        -p) pass="$2"; shift 2 ;;
+        -d) domain="$2"; shift 2 ;;
+        -H) hash="$2"; shift 2 ;;
+        -o) 
+            case "${2,,}" in 
                 w|windows) os_type="windows" ;;
                 l|linux) os_type="linux" ;;
-                *) log_error "Invalid OS type. Use 'w/windows' or 'l/linux'"; usage ;;
+                *) log_error "Invalid OS type"; usage ;;
             esac
+            shift 2
             ;;
-        h) usage ;;
-        *) usage ;;
+        --stealth) STEALTH="true"; shift ;;
+        -h|--help) usage ;;
+        *) log_error "Unknown option: $1"; usage ;;
     esac
 done
 
@@ -2435,13 +2478,14 @@ for port in "${web_ports[@]}"; do
         print_cmd "curl -I -k -s -m 5 $url"
         curl -I -k -s -m 5 $url 2>/dev/null | tee nxc-enum/http/headers_${port}.txt
         
-        log_info "NetExec HTTP Info:"
-        print_cmd "nxc http $IP --port $port"
-        unbuffer nxc http $IP --port $port 2>/dev/null | tee nxc-enum/http/nxc_http_${port}.txt
-        
-        log_info "Nikto Scan (Timed):"
-        print_cmd "nikto -h $url -Tuning 123b"
-        timeout 300s nikto -h $url -Tuning 123b -output nxc-enum/http/nikto_${port}.txt
+        # Check if nxc supports http protocol before running
+        if nxc --help | grep -q "http"; then
+            log_info "NetExec HTTP Info:"
+            print_cmd "nxc http $IP --port $port"
+            unbuffer nxc http $IP --port $port 2>/dev/null | tee nxc-enum/http/nxc_http_${port}.txt
+        else
+            log_warning "Installed NetExec version does not support HTTP protocol. Skipping..."
+        fi
     fi
 done
 

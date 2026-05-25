@@ -103,8 +103,11 @@ pipx ensurepath
 
 ### 🐍 Python Version (Recommended)
 ```bash
-python3 nxc-auto.py -i <IP> [-u USER] [-p PASSWORD] [-d DOMAIN] [-H HASH] [-o OS_TYPE]
+python3 nxc-auto.py -i <IP> [-u USER] [-p PASSWORD] [-d DOMAIN] [-H HASH] [-o OS_TYPE] [--stealth]
 ```
+
+**New Arguments:**
+- `--stealth`: **(Strategy C)** Limit concurrency and add random delays to avoid triggering IPS/firewalls.
 
 ### 🐚 Bash Version
 ```bash
