@@ -69,4 +69,4 @@ sudo ln -s "$(pwd)/nxc-auto.sh" /usr/local/bin/nxc-auto
 - **Timeouts:** All remote tool calls should have sensible timeouts (default 15-30s) to prevent hanging during scans.
 - **No-Destruction Policy:** Do not implement auto-fix logic that could disrupt target services (e.g., clearing remote logs).
 - **Tool Check:** Always verify dependencies using `check_dependencies` before execution.
-- **Cross-Platform Compatibility:** The codebase has been audited for Linux compatibility (LF line endings, proper shebangs, and no hardcoded local user paths). It is optimized for Kali Linux and other Debian-based security distributions.
+
