@@ -29,6 +29,7 @@ domain=""
 hash=""
 os_type=""  # Will be auto-detected if not specified
 ANON_RUN="false"
+CHECK_ALIVE="false"
 DC_IP=""    # Will be set to IP initially, then updated if a DC is found
 
 # --- Color Definitions & ADHD Friendly Output ---
@@ -76,6 +77,9 @@ log_cmd() {
 
 # Function to check if the target is still alive to prevent hanging
 check_target_alive() {
+    # Exit early if check is not requested
+    if [ "$CHECK_ALIVE" != "true" ]; then return 0; fi
+
     # Skip check if IP is not set yet
     if [ -z "$IP" ]; then return 0; fi
     
@@ -490,6 +494,7 @@ usage() {
     echo "  -d  Domain"
     echo "  -H  NTLM Hash"
     echo "  -o  Target OS type: 'w' or 'windows', 'l' or 'linux' (auto-detected if not specified)"
+    echo "  -n  Check if target is alive before scanning"
     echo "  -h  Show this help message"
     echo ""
     echo -e "${BYELLOW}${BOLD}IMPORTANT:${NC} Always quote passwords and usernames with special characters!"
@@ -514,6 +519,7 @@ while [[ $# -gt 0 ]]; do
             esac
             shift 2
             ;;
+        -n) CHECK_ALIVE="true"; shift ;;
         --stealth) STEALTH="true"; shift ;;
         -h|--help) usage ;;
         *) log_error "Unknown option: $1"; usage ;;

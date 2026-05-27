@@ -66,6 +66,7 @@ class State:
     VALID_CREDS_FILE = "nxc-enum/valid_credentials.txt"
     POTENTIAL_CREDS_FILE = "nxc-enum/potential_credentials.txt"
     STEALTH = False
+    CHECK_ALIVE = False
     SEMAPHORE = None
 
 # --- Utility Functions ---
@@ -873,6 +874,7 @@ def parse_args():
     parser.add_argument("-d", "--domain", help="Domain", default="")
     parser.add_argument("-H", "--hash", help="NTLM Hash", default="")
     parser.add_argument("-o", "--os", choices=['w', 'windows', 'l', 'linux'], help="Target OS type")
+    parser.add_argument("-n", "--check-alive", action="store_true", help="Check if target is alive before scanning")
     parser.add_argument("--stealth", action="store_true", help="Stealth mode: limit concurrency and add delays")
     
     args = parser.parse_args()
@@ -881,6 +883,7 @@ def parse_args():
     State.PASS = args.password
     State.DOMAIN = args.domain
     State.HASH = args.hash
+    State.CHECK_ALIVE = args.check_alive
     State.STEALTH = args.stealth
     
     if args.os in ['w', 'windows']:
@@ -973,7 +976,8 @@ async def main():
     log_section("Target Configuration")
     log_info(f"Target IP: {Colors.BWHITE}{State.IP}{Colors.NC}")
     
-    await check_target_alive(State.IP)
+    if State.CHECK_ALIVE:
+        await check_target_alive(State.IP)
     
     # Discovery
     if not State.OS_TYPE or not State.DOMAIN:
