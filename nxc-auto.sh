@@ -2484,8 +2484,8 @@ for port in "${web_ports[@]}"; do
         print_cmd "curl -I -k -s -m 5 $url"
         curl -I -k -s -m 5 $url 2>/dev/null | tee nxc-enum/http/headers_${port}.txt
         
-        # Check if nxc supports http protocol before running
-        if nxc --help | grep -q "http"; then
+        # Check if nxc supports http protocol before running (more precise check)
+        if nxc http --help >/dev/null 2>&1; then
             log_info "NetExec HTTP Info:"
             print_cmd "nxc http $IP --port $port"
             unbuffer nxc http $IP --port $port 2>/dev/null | tee nxc-enum/http/nxc_http_${port}.txt

@@ -662,9 +662,18 @@ async def enum_http():
         log_info("No common web ports (80, 443, 8080, 8443) open.")
         return
 
-    # Check for NXC HTTP support
-    rc, help_out = await async_run_cmd(["nxc", "--help"])
-    nxc_has_http = "http" in help_out.lower()
+    # Check for NXC HTTP support (be specific to avoid false positives in help text)
+    nxc_has_http = False
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "nxc", "http", "--help",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        await proc.wait()
+        nxc_has_http = (proc.returncode == 0)
+    except:
+        pass
 
     await asyncio.gather(*[scan_web_port(p, nxc_has_http) for p in open_web_ports])
 
