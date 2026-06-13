@@ -2470,7 +2470,7 @@ fi
 
 # Web Enumeration (HTTP/HTTPS)
 log_section "Web Enumeration (HTTP/HTTPS)"
-web_ports=(80 443 8080 8443)
+web_ports=(80 443 8080 8443 8000 8008 8888)
 for port in "${web_ports[@]}"; do
     if check_port $IP $port; then
         protocol="http"
@@ -2483,15 +2483,14 @@ for port in "${web_ports[@]}"; do
         log_info "Banner Grab (curl):"
         print_cmd "curl -I -k -s -m 5 $url"
         curl -I -k -s -m 5 $url 2>/dev/null | tee nxc-enum/http/headers_${port}.txt
+
+        log_info "Checking robots.txt:"
+        curl -k -s -m 5 $url/robots.txt 2>/dev/null | tee nxc-enum/http/robots_${port}.txt
         
-        # Check if nxc supports http protocol before running (more precise check)
-        if nxc http --help >/dev/null 2>&1; then
-            log_info "NetExec HTTP Info:"
-            print_cmd "nxc http $IP --port $port"
-            unbuffer nxc http $IP --port $port 2>/dev/null | tee nxc-enum/http/nxc_http_${port}.txt
-        else
-            log_warning "Installed NetExec version does not support HTTP protocol. Skipping..."
-        fi
+        log_success "Suggested Web Tools:"
+        echo "whatweb $url"
+        echo "gobuster dir -u $url -w /usr/share/wordlists/dirb/common.txt -k"
+        echo "nikto -h $url"
     fi
 done
 
