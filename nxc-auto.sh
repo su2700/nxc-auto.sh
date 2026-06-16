@@ -1441,10 +1441,8 @@ if [ "$os_type" = "windows" ] || check_port $IP 21; then
 fi
 }
 
-# Run anonymous enumeration early ONLY if no credentials were provided
-if [ -z "$user" ]; then
-    run_anonymous_enumeration
-fi
+# Always run anonymous enumeration to discover misconfigurations
+run_anonymous_enumeration
 
 
 
@@ -2544,19 +2542,7 @@ if [ "$os_type" = "windows" ] && [ -n "$user" ]; then
     fi
 fi
 
-# Ask to run anonymous enumeration if credentials were provided
-if [ -n "$user" ] && [ "$ANON_RUN" = "false" ]; then
-    echo ""
-    log_section "Anonymous / Guest Enumeration"
-    echo -e "${BYELLOW}❓ Do you want to continue on anonymous / guest mode?${NC}"
-    read -p "   [y/N]: " run_anon_choice
-    echo ""
-    if [[ "$run_anon_choice" =~ ^[Yy]$ ]]; then
-        run_anonymous_enumeration
-    else
-        log_info "Skipping anonymous / guest enumeration."
-    fi
-fi
+
 
 echo -e "\n${BGREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 log_success "Enumeration Complete!"

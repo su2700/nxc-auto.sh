@@ -1003,15 +1003,15 @@ async def main():
     with open(State.POTENTIAL_CREDS_FILE, "w") as f: pass
 
     # Phase 1: Anonymous Enumeration
+    # Always check anonymous access to discover misconfigurations, even if creds are provided
+    await asyncio.gather(
+        enum_smb(anonymous=True),
+        enum_ldap(anonymous=True),
+        enum_enum4linux_ng()
+    )
+    
+    # Try to promote any found creds (only if the user didn't already provide creds)
     if not State.USER:
-        # Run SMB, LDAP, and enum4linux-ng anonymous checks in parallel
-        await asyncio.gather(
-            enum_smb(anonymous=True),
-            enum_ldap(anonymous=True),
-            enum_enum4linux_ng()
-        )
-        
-        # Try to promote any found creds
         if promote_verified_creds():
             log_success("Successfully promoted discovered credentials!")
             
