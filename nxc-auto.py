@@ -417,8 +417,35 @@ async def check_and_suggest(service, cmd):
             suggest_ldap(out)
         elif service == "winrm":
             suggest_winrm(out)
-            
+        elif service == "ssh":
+            suggest_ssh(out)
+        elif service == "rdp":
+            suggest_rdp(out)
+        elif service == "mssql":
+            suggest_mssql(out)
+
     return out
+
+def suggest_ssh(output):
+    log_section("SSH Suggestions")
+    log_success("SSH ACCESS DETECTED")
+    print(f"ssh {State.USER}@{State.IP}")
+    if State.PASS:
+        print(f"sshpass -p '{State.PASS}' ssh {State.USER}@{State.IP}")
+
+def suggest_rdp(output):
+    log_section("RDP Suggestions")
+    log_success("RDP ACCESS DETECTED")
+    print(f"xfreerdp /v:{State.IP} /u:{State.USER} /p:{State.PASS if State.PASS else ''} {'/d:' + State.DOMAIN if State.DOMAIN else ''} /clipboard /dynamic-resolution")
+
+def suggest_mssql(output):
+    log_section("MSSQL Suggestions")
+    log_success("MSSQL ACCESS DETECTED")
+    target = f"{State.DOMAIN}/{State.USER}" if State.DOMAIN else State.USER
+    if State.HASH:
+        print(f"impacket-mssqlclient {target}@{State.IP} -hashes :{State.HASH}")
+    else:
+        print(f"impacket-mssqlclient {target}:'{State.PASS}'@{State.IP}")
 
 def suggest_smb(output):
     clean_out = re.sub(r'\x1b\[[0-9;]*m', '', output)
@@ -633,7 +660,7 @@ async def enum_rdp():
         if State.DOMAIN: cmd.extend(["-d", State.DOMAIN])
         await check_and_suggest("rdp", cmd)
 
-async def scan_web_port(port, nxc_has_http):
+async def scan_web_port(port):
     protocol = "https" if port in [443, 8443] else "http"
     url = f"{protocol}://{State.IP}:{port}"
     log_success(f"Port {port} is OPEN ({protocol})!")
@@ -642,14 +669,21 @@ async def scan_web_port(port, nxc_has_http):
         async_run_cmd(["curl", "-I", "-k", "-s", "-m", "5", url], outfile=f"{State.ENUM_DIR}/http/headers_{port}.txt")
     ]
     
-    if nxc_has_http:
-        tasks.append(async_run_cmd(["nxc", "http", State.IP, "--port", str(port)], outfile=f"{State.ENUM_DIR}/http/nxc_http_{port}.txt"))
+    # Check for robots.txt as a basic discovery
+    tasks.append(async_run_cmd(["curl", "-k", "-s", "-m", "5", f"{url}/robots.txt"], outfile=f"{State.ENUM_DIR}/http/robots_{port}.txt"))
         
     await asyncio.gather(*tasks)
+    
+    # Suggestions for other tools
+    log_section(f"Web Suggestions ({port})")
+    print(f"whatweb {url}")
+    print(f"gobuster dir -u {url} -w /usr/share/wordlists/dirb/common.txt -k")
+    print(f"nikto -h {url}")
 
 async def enum_http():
     log_section("Web Enumeration (HTTP/HTTPS)")
-    web_ports = [80, 443, 8080, 8443]
+    # Expanded web ports
+    web_ports = [80, 443, 8080, 8443, 8000, 8008, 8888]
     
     # Check which ports are open first
     open_web_ports = []
@@ -659,23 +693,31 @@ async def enum_http():
             open_web_ports.append(p)
             
     if not open_web_ports:
-        log_info("No common web ports (80, 443, 8080, 8443) open.")
+        log_info("No common web ports open.")
         return
 
-    # Check for NXC HTTP support (be specific to avoid false positives in help text)
-    nxc_has_http = False
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "nxc", "http", "--help",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL
-        )
-        await proc.wait()
-        nxc_has_http = (proc.returncode == 0)
-    except:
-        pass
+    await asyncio.gather(*[scan_web_port(p) for p in open_web_ports])
 
-    await asyncio.gather(*[scan_web_port(p, nxc_has_http) for p in open_web_ports])
+async def enum_ssh():
+    if not await check_port(State.IP, 22, "SSH"): return
+    log_section("SSH Enumeration")
+    
+    tasks = [
+        async_run_cmd(["curl", "-s", "--connect-timeout", "5", f"telnet://{State.IP}:22"], outfile=f"{State.ENUM_DIR}/smb/ssh-banner.txt")
+    ]
+    
+    if State.USER:
+        cmd = ["nxc", "ssh", State.IP, "-u", State.USER]
+        if State.PASS: cmd.extend(["-p", State.PASS])
+        if State.HASH: cmd.extend(["-H", State.HASH])
+        
+        tasks.append(check_and_suggest("ssh", cmd))
+        tasks.append(async_run_cmd(cmd + ["-x", "id; uname -a"], outfile=f"{State.ENUM_DIR}/smb/ssh-exec.txt"))
+    else:
+        # Try some common defaults or just basic check
+        tasks.append(async_run_cmd(["nxc", "ssh", State.IP, "-u", "root", "-p", "root"], outfile=f"{State.ENUM_DIR}/smb/ssh-root-root.txt"))
+
+    await asyncio.gather(*tasks)
 
 def extract_users_from_files():
     """Extracts usernames from all discovery files in the smb directory."""
@@ -1041,7 +1083,8 @@ async def main():
         enum_nfs(),
         enum_ftp(),
         enum_http(),
-        enum_telnet()
+        enum_telnet(),
+        enum_ssh()
     )
     
     # Phase 4: Final Checks
