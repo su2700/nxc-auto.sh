@@ -1044,16 +1044,16 @@ async def main():
     with open(State.VALID_CREDS_FILE, "w") as f: pass
     with open(State.POTENTIAL_CREDS_FILE, "w") as f: pass
 
-    # Phase 1: Anonymous Enumeration
-    # Always check anonymous access to discover misconfigurations, even if creds are provided
-    await asyncio.gather(
-        enum_smb(anonymous=True),
-        enum_ldap(anonymous=True),
-        enum_enum4linux_ng()
-    )
-    
-    # Try to promote any found creds (only if the user didn't already provide creds)
+    # Phase 1: Anonymous Enumeration (Only if no creds provided)
     if not State.USER:
+        log_info("No credentials provided. Starting with anonymous enumeration...")
+        await asyncio.gather(
+            enum_smb(anonymous=True),
+            enum_ldap(anonymous=True),
+            enum_enum4linux_ng()
+        )
+        
+        # Try to promote any found creds
         if promote_verified_creds():
             log_success("Successfully promoted discovered credentials!")
             
@@ -1091,13 +1091,14 @@ async def main():
     if State.OS_TYPE == "windows" and State.USER:
         await dump_ntds()
 
-    # Final prompt for anonymous mode if user was provided but we want to check null session anyway
+    # Final prompt for anonymous mode if user was provided
     if args.user and not State.HAS_PROMOTED:
          choice = input(f"\n{Colors.BYELLOW}❓ Do you want to run anonymous/guest enumeration checks? [y/N]: {Colors.NC}")
          if choice.lower() == 'y':
              await asyncio.gather(
                  enum_smb(anonymous=True),
-                 enum_ldap(anonymous=True)
+                 enum_ldap(anonymous=True),
+                 enum_enum4linux_ng()
              )
 
     log_section("Enumeration Complete")
